@@ -22,7 +22,11 @@ const K = {
   CITIES_PER_REGION: 5,         /* 地域ごとの都市の数 */
   SEA_P: 0.04,                  /* 海のところの土地生成確率 */
   LAND_P: 0.92,                 /* 陸のところの土地生成確率 */
-  COAST_BLUR: 2.2,              /* 想定地形のふちのぼやけ（升） */
+  COAST_BLUR: 2.2,
+  COAST_REACH: 3,
+  TIDY_PASSES: 2,              /* 孤立した升を掃除する回数 */
+  TIDY_MIN: 2,                 /* 周りの陸がこれ以下なら海にする */
+  TIDY_MAX: 7,                 /* 周りの陸がこれ以上なら陸にする */              /* 都市を置ける「海からの近さ」（升・港湾都市） */              /* 想定地形のふちのぼやけ（升） */
 
   /* ── 探索（決定24・27・29・38・45・50・57） ── */
   REACH: 46,                    /* 船の探索可能距離（升） */
@@ -51,6 +55,10 @@ const K = {
 
   /* ── 見た目（決定30・75・tetsuki-pop.md） ── */
   ZOOM_FAR: 0.52, ZOOM_NEAR: 1.0,
+  FIELD_BLUR: 3,               /* 升目をぼかす回数。多いほど海岸線がなだらか */
+  ISO_COAST: 0.50,             /* 海岸線を取る高さ */
+  ISO_GRASS: 0.72,             /* 草のふちを取る高さ（砂の帯の広さになる） */
+  OUT_W: 0.34,                 /* 輪郭の太さ（升に対する比） */
   OUT: '#141b26', LW: 0.030,
   FOG: 'rgba(9,16,28,.84)',
   BOB_A: 0.5, BOB_HZ: 2.2,
@@ -132,7 +140,14 @@ function placeCities(){
       const x=Math.floor((r+R())*K.COLS/K.REGIONS);
       const y=Math.floor(R()*K.ROWS);
       if(x<2||y<2||x>K.COLS-3||y>K.ROWS-3) continue;
-      if(P[pi(x,y)]<0.55) continue;                       /* 想定で陸のところに置く */
+      if(P[pi(x,y)]<0.62) continue;                       /* 想定で陸のところ */
+      /* 港湾都市：近くに想定の海が無ければ置かない（決定36） */
+      let coast=false;
+      for(let dy=-K.COAST_REACH;dy<=K.COAST_REACH&&!coast;dy++)
+      for(let dx=-K.COAST_REACH;dx<=K.COAST_REACH&&!coast;dx++){
+        const nx=x+dx, ny=y+dy; if(nx<0||ny<0||nx>=K.COLS||ny>=K.ROWS) continue;
+        if(P[pi(nx,ny)]<0.32) coast=true; }
+      if(!coast) continue;
       if(CITIES.some(c=>Math.hypot(c.x-x,c.y-y)<9)) continue;
       const good=GOODS[Math.floor(R()*GOODS.length)];
       CITIES.push({x,y,region:r,good,name:NAMES[CITIES.length%NAMES.length],
@@ -213,12 +228,53 @@ function runExplore(pins){
   const cost=Math.round(ran*K.EXPLORE_COST*scoutMul());
   return {pins:pins.map(p=>({...p})), ran, cost, hit, applied:false};
 }
+function tidy(){                       /* ぽつんと残った一升を掃除する */
+  for(let pass=0;pass<K.TIDY_PASSES;pass++){
+    const next=ST.slice();
+    for(let y=1;y<K.ROWS-1;y++) for(let x=1;x<K.COLS-1;x++){
+      const i=pi(x,y); if(!ST[i]) continue;
+      let land=0, known=0;
+      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+        if(!dx&&!dy) continue; const j=pi(x+dx,y+dy);
+        if(!ST[j]) continue; known++; if(ST[j]===2) land++; }
+      if(known<5) continue;
+      if(ST[i]===2 && land<=K.TIDY_MIN) next[i]=1;      /* 孤立した陸 → 海 */
+      if(ST[i]===1 && land>=K.TIDY_MAX) next[i]=2;      /* 陸に囲まれた海 → 陸 */
+    }
+    ST.set(next);
+  }
+  CITIES.forEach(c=>{ if(c.shown) ST[pi(c.x,c.y)]=2; });
+}
 function applyResult(res){
   if(res.hit) revealCircle(res.hit.x,res.hit.y,K.REVEAL_R,false);
   else { const pts=polyPoints(res.pins);
          pts.forEach(p=>revealCircle(Math.round(p.x),Math.round(p.y),K.SCAN_R,true)); }
   const found=[];
-  CITIES.forEach(c=>{ if(!c.shown && ST[pi(c.x,c.y)]===2){ c.shown=true; found.push(c); } });
+  CITIES.forEach(c=>{
+    if(c.shown) return;
+    if(ST[pi(c.x,c.y)]===0) return;
+    ST[pi(c.x,c.y)]=2;                                   /* 都市の升は必ず陸 */
+    let sea=false;
+    for(let dy=-K.COAST_REACH;dy<=K.COAST_REACH;dy++)
+    for(let dx=-K.COAST_REACH;dx<=K.COAST_REACH;dx++){
+      const nx=c.x+dx, ny=c.y+dy; if(nx<0||ny<0||nx>=K.COLS||ny>=K.ROWS) continue;
+      if(ST[pi(nx,ny)]===1) sea=true; }
+    if(!sea){                                            /* 面していなければ海を通す（港湾都市・決定36） */
+      let best=null,bd=1e9;
+      for(let dy=-K.COAST_REACH-2;dy<=K.COAST_REACH+2;dy++)
+      for(let dx=-K.COAST_REACH-2;dx<=K.COAST_REACH+2;dx++){
+        const nx=c.x+dx, ny=c.y+dy; if(nx<0||ny<0||nx>=K.COLS||ny>=K.ROWS) continue;
+        const d=Math.hypot(dx,dy); if(d<1||d>bd) continue;
+        if(P[pi(nx,ny)]<0.5){ bd=d; best={x:nx,y:ny}; } }
+      if(best){ /* 都市から海まで、細い水路を通す */
+        const n=Math.ceil(bd);
+        for(let i=1;i<=n;i++){
+          const x=Math.round(c.x+(best.x-c.x)*i/n), y=Math.round(c.y+(best.y-c.y)*i/n);
+          if(ST[pi(x,y)]!==0) ST[pi(x,y)]=1; }
+      }
+    }
+    c.shown=true; found.push(c); });
+  tidy(); dirty=true;
   res.found=found; res.applied=true;
 }
 
@@ -356,6 +412,86 @@ function nextTurn(){                          /* 決定60：次に進むと確�
 }
 function restart(){ location.reload(); }
 
+/* ══ 海岸線を「升目をぼかした場の等高線」として取り出す ══════
+   升目そのままだとギザギザ、ぼかしただけだと甘い。
+   ぼかしてから線を取り出すと、なめらかで、しかも輪郭が引ける（がべの指摘） */
+let dirty=true, Lland=[], Lgrass=[], Lknown=[];
+function blurField(pred){
+  let A=new Float32Array(K.COLS*K.ROWS);
+  for(let y=0;y<K.ROWS;y++) for(let x=0;x<K.COLS;x++) A[pi(x,y)]=pred(x,y)?1:0;
+  for(let k=0;k<K.FIELD_BLUR;k++){
+    const B=new Float32Array(A.length);
+    for(let y=0;y<K.ROWS;y++) for(let x=0;x<K.COLS;x++){
+      let t=0,n=0;
+      for(let dy=-1;dy<=1;dy++) for(let dx=-1;dx<=1;dx++){
+        const nx=x+dx, ny=y+dy; if(nx<0||ny<0||nx>=K.COLS||ny>=K.ROWS) continue;
+        t+=A[pi(nx,ny)]; n++; }
+      B[pi(x,y)]=t/n; }
+    A=B; }
+  return A;
+}
+function isoLoops(F,iso){
+  const segs=[];
+  const V=(x,y)=>(x<0||y<0||x>=K.COLS||y>=K.ROWS)?0:F[pi(x,y)];
+  const ip=(x1,y1,v1,x2,y2,v2)=>{const t=(iso-v1)/((v2-v1)||1e-6);
+    return [x1+(x2-x1)*t, y1+(y2-y1)*t];};
+  for(let y=-1;y<K.ROWS;y++) for(let x=-1;x<K.COLS;x++){
+    const a=V(x,y),b=V(x+1,y),c=V(x+1,y+1),d=V(x,y+1);
+    const id=(a>iso?8:0)|(b>iso?4:0)|(c>iso?2:0)|(d>iso?1:0);
+    if(id===0||id===15) continue;
+    const T=()=>ip(x,y,a,x+1,y,b), Rr=()=>ip(x+1,y,b,x+1,y+1,c),
+          Bo=()=>ip(x,y+1,d,x+1,y+1,c), L=()=>ip(x,y,a,x,y+1,d);
+    const put=(p,q)=>segs.push([p,q]);
+    switch(id){
+      case 1: case 14: put(L(),Bo()); break;
+      case 2: case 13: put(Bo(),Rr()); break;
+      case 3: case 12: put(L(),Rr()); break;
+      case 4: case 11: put(T(),Rr()); break;
+      case 6: case 9:  put(T(),Bo()); break;
+      case 7: case 8:  put(L(),T()); break;
+      case 5:  put(L(),T()); put(Bo(),Rr()); break;
+      case 10: put(T(),Rr()); put(L(),Bo()); break;
+    }
+  }
+  /* 向きが揃わないので、向き無しで繋ぐ */
+  const key=p=>p[0].toFixed(3)+','+p[1].toFixed(3);
+  const at=new Map();
+  const push=(k,sg)=>{ if(!at.has(k)) at.set(k,[]); at.get(k).push(sg); };
+  segs.forEach(sg=>{ push(key(sg[0]),sg); push(key(sg[1]),sg); });
+  const used=new Set(), loops=[];
+  for(const sg of segs){
+    if(used.has(sg)) continue;
+    used.add(sg);
+    const loop=[sg[0],sg[1]];
+    let endK=key(sg[1]);
+    const startK=key(sg[0]);
+    while(true){
+      const nx=(at.get(endK)||[]).find(t=>!used.has(t));
+      if(!nx) break;
+      used.add(nx);
+      const q = key(nx[0])===endK ? nx[1] : nx[0];
+      loop.push(q); endK=key(q);
+      if(endK===startK) break;
+    }
+    /* 閉じた輪だけを採る（無理に閉じると楔が走る） */
+    if(endK===startK && loop.length>4) loops.push(loop);
+  }
+  return loops;
+}
+function addLoopsOn(ctx,loops){
+  ctx.beginPath();
+  loops.forEach(loop=>{
+    const P=loop.map(p=>cellToPx(p[0]+0.5,p[1]+0.5));
+    const mid=(a,b)=>({x:(a.x+b.x)/2,y:(a.y+b.y)/2});
+    const m0=mid(P[0],P[1]); ctx.moveTo(m0.x,m0.y);
+    for(let i=1;i<P.length;i++){ const nx=P[(i+1)%P.length], mm=mid(P[i],nx);
+      ctx.quadraticCurveTo(P[i].x,P[i].y,mm.x,mm.y); }
+    ctx.closePath();
+  });
+}
+const g2ref={ctx:null};
+function addLoops(loops){ addLoopsOn(g,loops); }
+
 /* ══ 描く（tetsuki-pop.md の手つき） ══════════════════════ */
 function el(x,y,rx,ry,fill,lw){ g.beginPath(); g.ellipse(x,y,rx,ry,0,0,7);
   g.fillStyle=fill; g.fill(); if(lw){g.strokeStyle=K.OUT;g.lineWidth=lw;g.stroke();} }
@@ -409,41 +545,41 @@ function ship(px,py,s,t){
   g.restore();
 }
 
-let fogC=null, seaC=document.createElement('canvas'), seaC2=document.createElement('canvas'),
-    landC=document.createElement('canvas'), landC2=document.createElement('canvas');
+const NC=()=>document.createElement('canvas');
+let fogC=null, seaC=NC(), seaC2=NC(), landC=NC(), landC2=NC(), fogHole=NC(),
+    mKnown=NC(), mStripe=NC(), mLand=NC();
 function draw(t){
   BTN.length=0;
   const s=K.CELL*S.zoom;
   g.fillStyle='#0e1420'; g.fillRect(0,0,W,H);
 
-  /* 海と陸 ── 升目ではなく、丸を重ねた塊として描く（tetsuki-pop.md） */
-  const x0=Math.max(0,Math.floor(-S.camX/s)-2), x1=Math.min(K.COLS,Math.ceil((W-S.camX)/s)+2);
-  const y0=Math.max(0,Math.floor(-S.camY/s)-2), y1=Math.min(K.ROWS,Math.ceil((H-S.camY)/s)+2);
-  const lay=(cv)=>{ if(cv.width!==CV.width){cv.width=CV.width;cv.height=CV.height;}
-    const c=cv.getContext('2d'); c.setTransform(DPR,0,0,DPR,0,0); c.clearRect(0,0,W,H); return c; };
-  const disc=(c,pred,r)=>{ c.fillStyle='#fff'; c.beginPath();
-    for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){ if(!pred(x,y)) continue;
-      const q=cellToPx(x+.5,y+.5); c.moveTo(q.x+r,q.y); c.arc(q.x,q.y,r,0,7); }
-    c.fill(); };
-  const tint=(cv,color)=>{ const c=cv.getContext('2d');
-    c.globalCompositeOperation='source-in'; c.fillStyle=color; c.fillRect(0,0,W,H);
-    c.globalCompositeOperation='source-over'; };
-  const known=(x,y)=>ST[pi(x,y)]!==0, isLand=(x,y)=>ST[pi(x,y)]===2;
+  /* 海と陸 ── ぼかした場の等高線で描く */
+  if(dirty){
+    const known=(x,y)=>ST[pi(x,y)]!==0, isLand=(x,y)=>ST[pi(x,y)]===2;
+    const Fl=blurField(isLand), Fk=blurField(known);
+    Lland=isoLoops(Fl,K.ISO_COAST); Lgrass=isoLoops(Fl,K.ISO_GRASS);
+    Lknown=isoLoops(Fk,K.ISO_COAST); dirty=false;
+  }
+  const OW=Math.max(3,s*K.OUT_W);
+  g.lineJoin='round'; g.lineCap='round';
 
   /* 海 */
-  disc(lay(seaC),known,s*1.20); tint(seaC,C.sea); g.drawImage(seaC,0,0,W,H);
-  g.save(); g.globalAlpha=.55;
-  disc(lay(seaC2),(x,y)=>known(x,y)&&(y%6<3),s*1.20); tint(seaC2,C.sea2);
-  g.drawImage(seaC2,0,0,W,H); g.restore();
+  addLoops(Lknown); g.fillStyle=C.sea; g.fill('evenodd');
+  g.save(); addLoops(Lknown); g.clip('evenodd');
+  g.fillStyle=C.sea2; g.globalAlpha=.45;
+  for(let y=0;y<K.ROWS;y+=6){ const q=cellToPx(0,y); g.fillRect(0,q.y,W,s*3); }
+  g.restore();
 
-  /* 陸：暗い輪郭 → 砂 → 草 → 照り */
-  const ow=Math.max(2,s*0.20);
-  disc(lay(landC),isLand,s*1.02); tint(landC,K.OUT);
-  for(let a2=0;a2<8;a2++) g.drawImage(landC,Math.cos(a2*0.785)*ow,Math.sin(a2*0.785)*ow,W,H);
-  disc(lay(landC),isLand,s*1.02); tint(landC,C.sand); g.drawImage(landC,0,0,W,H);
-  disc(lay(landC2),isLand,s*0.80); tint(landC2,C.grass); g.drawImage(landC2,0,0,W,H);
-  disc(lay(landC2),isLand,s*0.66); tint(landC2,'rgba(255,255,255,.18)');
-  g.drawImage(landC2,0,-s*0.24,W,H);
+  /* 陸：輪郭 → 砂 → 草 → 照り */
+  addLoops(Lland);
+  g.strokeStyle=K.OUT; g.lineWidth=OW*2; g.stroke();
+  g.fillStyle=C.sand; g.fill('evenodd');
+  addLoops(Lgrass);
+  g.strokeStyle=K.OUT; g.lineWidth=OW*0.7; g.stroke();
+  g.fillStyle=C.grass; g.fill('evenodd');
+  g.save(); addLoops(Lgrass); g.clip('evenodd');
+  addLoops(Lgrass); g.strokeStyle='rgba(255,255,255,.20)'; g.lineWidth=OW*2.4; g.stroke();
+  g.restore();
 
   /* 霧（未探索）── 別紙に描いて destination-out で抜く */
   if(!fogC) fogC=document.createElement('canvas');
@@ -452,10 +588,8 @@ function draw(t){
   fg.clearRect(0,0,W,H); fg.globalCompositeOperation='source-over';
   fg.fillStyle=K.FOG; fg.fillRect(0,0,W,H);
   fg.globalCompositeOperation='destination-out';
-  fg.fillStyle='#000'; fg.beginPath();
-  for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){ if(!ST[pi(x,y)]) continue;
-    const q=cellToPx(x+.5,y+.5); fg.moveTo(q.x+s*1.02,q.y); fg.arc(q.x,q.y,s*1.02,0,7); }
-  fg.fill();
+  fg.fillStyle='#000';
+  { const save=g2ref.ctx; g2ref.ctx=fg; addLoopsOn(fg,Lknown); fg.fill('evenodd'); g2ref.ctx=save; }
   fg.globalCompositeOperation='source-over';
   g.drawImage(fogC,0,0,W,H);
 
