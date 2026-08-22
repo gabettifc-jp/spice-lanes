@@ -1,0 +1,260 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spice-lanes 見本2 ── HTMLでどこまで行けるか</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#14161b;color:#e8e8e8;
+     font:14px/1.65 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+header{padding:16px 20px;border-bottom:1px solid #292d36}
+h1{margin:0 0 4px;font-size:15px;letter-spacing:.04em}
+header p{margin:0;font-size:12px;color:#98a1b0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:16px;padding:18px 20px 24px}
+figure{margin:0;border:1px solid #292d36;border-radius:4px;overflow:hidden;background:#0d0f14}
+figure svg{display:block;width:100%;height:auto}
+figcaption{padding:9px 12px 11px;font-size:12px;line-height:1.55;border-top:1px solid #292d36}
+.num{display:inline-block;min-width:1.5em;font-weight:700;color:#fff}
+.how{color:#7c8695;font-size:11px;display:block;margin-top:3px}
+footer{padding:0 20px 26px;font-size:12px;color:#7c8695;max-width:70ch}
+b{color:#e8e8e8}
+</style>
+
+<header>
+  <h1>spice-lanes 見本2 ── HTMLでどこまで行けるか</h1>
+  <p>同じ小さな地図を、七通りで描いた。全部 HTML／SVG だけ。画像素材はひとつも使っていない。<b>番号で呼んで。</b></p>
+</header>
+
+<div class="grid" id="grid"></div>
+
+<footer>
+  盤面は七つとも同じ ── 陸ひとつ、街ふたつ、航路いっぽん、右下は未踏。<br>
+  違うのは<b>質感の作り方だけ</b>で、どれもコードで生成している（紙の繊維＝乱流ノイズ、
+  手描きの揺れ＝変位マップ、立体＝法線ライティング、にじみ＝多重ぼかし）。<br><br>
+  <b>これは選ばせる回ではない。</b>どのくらいまで行けるかを見せる回。
+  近いものが在れば番号で、無ければ「全部違う」で返して。
+</footer>
+
+<script>
+/* ══ 盤面（七枚とも同じ） ═══════════════════════════════ */
+const W=340,H=210;
+const LAND='M 26 120 C 34 92, 62 74, 96 72 C 130 70, 150 84, 176 78 '+
+           'C 206 71, 226 86, 232 108 C 238 130, 220 150, 190 154 '+
+           'C 158 158, 132 148, 104 154 C 72 161, 40 148, 26 120 Z';
+const ISLE='M 250 60 C 262 52, 280 55, 286 66 C 292 78, 282 88, 268 87 C 254 86, 244 72, 250 60 Z';
+const CITY=[{x:92,y:104,n:'ベルヌ'},{x:196,y:132,n:'サンティラ'},{x:268,y:72,n:'アズハル'}];
+const LANE=[0,1];
+const FOG='M 236 210 L 340 210 L 340 96 C 306 104, 292 146, 288 178 C 286 196, 268 206, 236 210 Z';
+
+/* ══ 七つの描き方 ══════════════════════════════════════ */
+const STYLES=[
+{ id:'kochizu', name:'古地図の写実',
+  how:'羊皮紙＝乱流ノイズを重ね掛け／海岸線＝変位マップで手描きの揺れ／海＝等深線のハッチング／羅針図は線で作画',
+  bg:'#e3d5b4', sea:'#d8c9a6', land:'#cdb98d', ink:'#5a4a30', city:'#3a2f1c', lane:'#8f3a2c', fog:'#c9b892',
+  build:(u)=>`
+  <defs>
+    <filter id="pap${u}" x="0" y="0" width="100%" height="100%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.9" numOctaves="4" seed="3"/>
+      <feColorMatrix type="saturate" values="0"/></filter>
+    <filter id="wob${u}">
+      <feTurbulence type="fractalNoise" baseFrequency="0.035" numOctaves="3" seed="11" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="5" xChannelSelector="R" yChannelSelector="G"/></filter>
+    <pattern id="hat${u}" width="7" height="7" patternUnits="userSpaceOnUse" patternTransform="rotate(35)">
+      <line x1="0" y1="0" x2="0" y2="7" stroke="#5a4a30" stroke-width=".45" opacity=".35"/></pattern>
+  </defs>
+  <rect width="${W}" height="${H}" fill="#e3d5b4"/>
+  <rect width="${W}" height="${H}" fill="url(#hat${u})" opacity=".5"/>
+  <g filter="url(#wob${u})">
+    <path d="${LAND}" fill="#cdb98d" stroke="#5a4a30" stroke-width="1.5"/>
+    <path d="${LAND}" fill="none" stroke="#5a4a30" stroke-width=".5" opacity=".45"
+          transform="translate(4,4) scale(.985)" transform-origin="center"/>
+    <path d="${ISLE}" fill="#cdb98d" stroke="#5a4a30" stroke-width="1.3"/>
+  </g>
+  ${compass(u,'#5a4a30',300,168,20)}
+  <rect width="${W}" height="${H}" filter="url(#pap${u})" opacity=".22" style="mix-blend-mode:multiply"/>`
+},
+
+{ id:'atsunuri', name:'厚塗りのイラスト',
+  how:'陸＝多重グラデーション＋落ち影／海＝深さで色を変え、白い波頭をぼかして重ねる／光は左上から一定',
+  bg:'#123047', sea:'#154b6b', land:'#4e7a44', ink:'#eaf3f8', city:'#ffd98a', lane:'#ffe3a8', fog:'#0a1a26',
+  build:(u)=>`
+  <defs>
+    <linearGradient id="sea${u}" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1d6b93"/><stop offset="1" stop-color="#0e3a55"/></linearGradient>
+    <radialGradient id="lnd${u}" cx=".33" cy=".25" r=".85">
+      <stop offset="0" stop-color="#7fae62"/><stop offset=".55" stop-color="#4e7a44"/>
+      <stop offset="1" stop-color="#2c4c2f"/></radialGradient>
+    <filter id="sh${u}" x="-20%" y="-20%" width="150%" height="150%">
+      <feDropShadow dx="3" dy="5" stdDeviation="4" flood-color="#04121c" flood-opacity=".55"/></filter>
+    <filter id="wv${u}"><feGaussianBlur stdDeviation="2.2"/></filter>
+  </defs>
+  <rect width="${W}" height="${H}" fill="url(#sea${u})"/>
+  <g filter="url(#wv${u})" opacity=".5">
+    <path d="M 20 60 q 26 -7 52 0 t 52 0" stroke="#bfe6f7" stroke-width="2" fill="none"/>
+    <path d="M 150 44 q 26 -7 52 0 t 52 0" stroke="#bfe6f7" stroke-width="1.6" fill="none"/>
+    <path d="M 40 182 q 30 -8 60 0 t 60 0" stroke="#bfe6f7" stroke-width="2.4" fill="none"/>
+  </g>
+  <g filter="url(#sh${u})">
+    <path d="${LAND}" fill="url(#lnd${u})"/>
+    <path d="${ISLE}" fill="url(#lnd${u})"/>
+  </g>
+  <path d="${LAND}" fill="none" stroke="#e9f6c9" stroke-width="1.1" opacity=".38"/>
+  <g opacity=".5" filter="url(#wv${u})">
+    <path d="${LAND}" fill="none" stroke="#ffffff" stroke-width="3" opacity=".35"/></g>`
+},
+
+{ id:'suisai', name:'水彩・淡彩',
+  how:'にじみ＝同じ形を三度、ずらして・ぼかして・薄く重ねる／縁の濃まりは輪郭のぼかし差／紙目は粗いノイズ',
+  bg:'#f4efe2', sea:'#dfeaef', land:'#e6e2c4', ink:'#4b5560', city:'#7a4a3a', lane:'#a2604a', fog:'#eae4d4',
+  build:(u)=>`
+  <defs>
+    <filter id="bl1${u}"><feGaussianBlur stdDeviation="5"/></filter>
+    <filter id="bl2${u}"><feGaussianBlur stdDeviation="2"/></filter>
+    <filter id="ed${u}">
+      <feTurbulence type="fractalNoise" baseFrequency="0.06" numOctaves="4" seed="5" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="9" xChannelSelector="R" yChannelSelector="G"/>
+      <feGaussianBlur stdDeviation=".7"/></filter>
+    <filter id="gr${u}">
+      <feTurbulence type="fractalNoise" baseFrequency="0.7" numOctaves="3" seed="9"/>
+      <feColorMatrix type="saturate" values="0"/></filter>
+  </defs>
+  <rect width="${W}" height="${H}" fill="#f4efe2"/>
+  <g filter="url(#bl1${u})" opacity=".45">
+    <rect x="6" y="6" width="${W-12}" height="${H-12}" fill="#cfe0e8" rx="14"/></g>
+  <g filter="url(#ed${u})">
+    <g opacity=".38"><path d="${LAND}" fill="#c9b98a" transform="translate(-3,-2)"/></g>
+    <g opacity=".38"><path d="${LAND}" fill="#d8cfa0" transform="translate(4,3)"/></g>
+    <g opacity=".55"><path d="${LAND}" fill="#ddd6ab"/><path d="${ISLE}" fill="#ddd6ab"/></g>
+  </g>
+  <g filter="url(#bl2${u})" opacity=".5">
+    <path d="${LAND}" fill="none" stroke="#8a7f52" stroke-width="2.4"/>
+    <path d="${ISLE}" fill="none" stroke="#8a7f52" stroke-width="2"/></g>
+  <rect width="${W}" height="${H}" filter="url(#gr${u})" opacity=".14" style="mix-blend-mode:multiply"/>`
+},
+
+{ id:'ukibori', name:'立体の地形（陰影起伏）',
+  how:'ノイズを高さと見なして法線ライティングを掛ける。海にも起伏。<b>これがHTMLでいちばん厚みが出る</b>',
+  bg:'#0f1a24', sea:'#16394f', land:'#5c6a3c', ink:'#e8f0f5', city:'#ffd27f', lane:'#8fd9ff', fog:'#060b10',
+  build:(u)=>`
+  <defs>
+    <filter id="rel${u}" x="-10%" y="-10%" width="130%" height="130%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.022" numOctaves="5" seed="17" result="h"/>
+      <feDiffuseLighting in="h" lighting-color="#dff0c8" surfaceScale="7" diffuseConstant="1" result="d">
+        <feDistantLight azimuth="315" elevation="52"/></feDiffuseLighting>
+      <feComposite in="d" in2="SourceGraphic" operator="in"/>
+    </filter>
+    <filter id="seaR${u}" x="-10%" y="-10%" width="130%" height="130%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="3" seed="4" result="h"/>
+      <feDiffuseLighting in="h" lighting-color="#8fd0ee" surfaceScale="2.2" diffuseConstant=".9">
+        <feDistantLight azimuth="315" elevation="60"/></feDiffuseLighting>
+    </filter>
+    <filter id="dp${u}" x="-20%" y="-20%" width="150%" height="150%">
+      <feDropShadow dx="2" dy="4" stdDeviation="5" flood-color="#000" flood-opacity=".6"/></filter>
+  </defs>
+  <rect width="${W}" height="${H}" fill="#0f2536"/>
+  <rect width="${W}" height="${H}" filter="url(#seaR${u})" opacity=".5" style="mix-blend-mode:overlay"/>
+  <g filter="url(#dp${u})">
+    <path d="${LAND}" fill="#4e5f36"/><path d="${ISLE}" fill="#4e5f36"/></g>
+  <g style="mix-blend-mode:multiply" opacity=".95">
+    <path d="${LAND}" fill="#fff" filter="url(#rel${u})"/>
+    <path d="${ISLE}" fill="#fff" filter="url(#rel${u})"/></g>
+  <path d="${LAND}" fill="none" stroke="#0a1118" stroke-width="1.4" opacity=".7"/>
+  <path d="${ISLE}" fill="none" stroke="#0a1118" stroke-width="1.2" opacity=".7"/>`
+},
+
+{ id:'doban', name:'銅版画・細密な線',
+  how:'面を塗らず、線の密度だけで濃さを作る（ハッチングを三方向）。文字も線に合わせる',
+  bg:'#efe9dc', sea:'#efe9dc', land:'#efe9dc', ink:'#20242a', city:'#20242a', lane:'#7a2f22', fog:'#e2dbcb',
+  build:(u)=>`
+  <defs>
+    <pattern id="h1${u}" width="5" height="5" patternUnits="userSpaceOnUse" patternTransform="rotate(20)">
+      <line x1="0" y1="0" x2="0" y2="5" stroke="#20242a" stroke-width=".42"/></pattern>
+    <pattern id="h2${u}" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(-40)">
+      <line x1="0" y1="0" x2="0" y2="4" stroke="#20242a" stroke-width=".38"/></pattern>
+    <pattern id="h3${u}" width="9" height="9" patternUnits="userSpaceOnUse">
+      <line x1="0" y1="0" x2="9" y2="0" stroke="#20242a" stroke-width=".3" opacity=".55"/></pattern>
+    <filter id="wb${u}">
+      <feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="2" seed="21" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="3" xChannelSelector="R" yChannelSelector="G"/></filter>
+  </defs>
+  <rect width="${W}" height="${H}" fill="#efe9dc"/>
+  <rect width="${W}" height="${H}" fill="url(#h3${u})" opacity=".5"/>
+  <g filter="url(#wb${u})">
+    <path d="${LAND}" fill="url(#h1${u})" stroke="#20242a" stroke-width="1.1"/>
+    <path d="${LAND}" fill="url(#h2${u})" opacity=".55"/>
+    <path d="${ISLE}" fill="url(#h1${u})" stroke="#20242a" stroke-width="1"/>
+    <path d="M 40 128 C 70 140, 110 138, 140 148" fill="none" stroke="#20242a" stroke-width=".5" opacity=".6"/>
+    <path d="M 60 96 C 92 88, 128 92, 158 86" fill="none" stroke="#20242a" stroke-width=".5" opacity=".5"/>
+  </g>
+  ${compass(u,'#20242a',302,170,18)}`
+},
+
+{ id:'modern', name:'上質な現代のイラスト',
+  how:'面はほぼ平ら。影は一段だけ、粒子をうっすら。線は細く均一。<b>いちばん作りやすく、崩れにくい</b>',
+  bg:'#f2f4f1', sea:'#cfe1e6', land:'#b9cf9c', ink:'#2f3a3f', city:'#e0663f', lane:'#4b7f8c', fog:'#dfe4e0',
+  build:(u)=>`
+  <defs>
+    <filter id="s2${u}" x="-20%" y="-20%" width="150%" height="150%">
+      <feDropShadow dx="0" dy="3" stdDeviation="3" flood-color="#2f3a3f" flood-opacity=".22"/></filter>
+    <filter id="n2${u}">
+      <feTurbulence type="fractalNoise" baseFrequency="0.85" numOctaves="2" seed="2"/>
+      <feColorMatrix type="saturate" values="0"/></filter>
+  </defs>
+  <rect width="${W}" height="${H}" fill="#cfe1e6"/>
+  <g opacity=".5">
+    <path d="M 0 150 Q 85 138 170 150 T 340 150 L 340 210 L 0 210 Z" fill="#c2d9df"/></g>
+  <g filter="url(#s2${u})">
+    <path d="${LAND}" fill="#b9cf9c"/><path d="${ISLE}" fill="#b9cf9c"/></g>
+  <path d="${LAND}" fill="none" stroke="#8fae72" stroke-width="1.2"/>
+  <path d="M 40 118 C 74 104, 112 108, 142 100" fill="none" stroke="#a3bd86" stroke-width="6"
+        stroke-linecap="round" opacity=".7"/>
+  <rect width="${W}" height="${H}" filter="url(#n2${u})" opacity=".08" style="mix-blend-mode:multiply"/>`
+},
+
+{ id:'yoru', name:'夜の海（見本1の乙）',
+  how:'比べるために置いた。平らな面＋発光だけ。<b>これが「全然違う」と言われたもの</b>',
+  bg:'#060b12', sea:'#0e2338', land:'#17402f', ink:'#cfe6f5', city:'#ffd27f', lane:'#7fd4ff', fog:'#000',
+  build:(u)=>`
+  <rect width="${W}" height="${H}" fill="#0e2338"/>
+  <path d="${LAND}" fill="#17402f" stroke="#2f6f55" stroke-width="1.2"/>
+  <path d="${ISLE}" fill="#17402f" stroke="#2f6f55" stroke-width="1.2"/>`
+}
+];
+
+/* ══ 共通の上物（街・航路・未踏・HUD）＝七枚に同じものを載せる ══ */
+function compass(u,c,cx,cy,r){
+  return `<g stroke="${c}" fill="none" opacity=".65">
+    <circle cx="${cx}" cy="${cy}" r="${r}" stroke-width=".7"/>
+    <circle cx="${cx}" cy="${cy}" r="${r*.62}" stroke-width=".4"/>
+    <path d="M ${cx} ${cy-r} L ${cx+r*.2} ${cy} L ${cx} ${cy+r} L ${cx-r*.2} ${cy} Z" fill="${c}" opacity=".55" stroke="none"/>
+    <path d="M ${cx-r} ${cy} L ${cx} ${cy-r*.2} L ${cx+r} ${cy} L ${cx} ${cy+r*.2} Z" fill="${c}" opacity=".3" stroke="none"/>
+  </g>`;
+}
+function overlay(s,u){
+  const A=CITY[LANE[0]],B=CITY[LANE[1]];
+  const glow = s.id==='yoru'||s.id==='ukibori'
+    ? `<filter id="gl${u}" x="-70%" y="-70%" width="240%" height="240%">
+         <feGaussianBlur stdDeviation="3" result="b"/>
+         <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>` : '';
+  const f = (s.id==='yoru'||s.id==='ukibori') ? `filter="url(#gl${u})"` : '';
+  const dash = ['kochizu','doban','suisai'].includes(s.id) ? 'stroke-dasharray="6 4"' : '';
+  return `<defs>${glow}</defs>
+   <line x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}" stroke="${s.lane}" stroke-width="3.2"
+     stroke-linecap="round" ${dash} ${f} opacity=".9"/>
+   ${CITY.map(c=>`<circle cx="${c.x}" cy="${c.y}" r="4" fill="${s.city}"
+      stroke="${s.bg}" stroke-width="1.2" ${f}/>
+     <text x="${c.x+7}" y="${c.y-5}" font-size="9.5" fill="${s.ink}"
+      font-family="${['kochizu','doban'].includes(s.id)?'Georgia,serif':'system-ui,sans-serif'}">${c.n}</text>`).join('')}
+   <path d="${FOG}" fill="${s.fog}" opacity="${s.id==='yoru'?1:.93}"/>
+   <text x="300" y="196" font-size="8.5" fill="${s.ink}" opacity=".5" text-anchor="middle">未踏</text>`;
+}
+
+const grid=document.getElementById('grid');
+STYLES.forEach((s,i)=>{
+  const u='u'+i;
+  grid.insertAdjacentHTML('beforeend',
+    `<figure>
+      <svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${s.build(u)}${overlay(s,u)}</svg>
+      <figcaption><span class="num">${i+1}</span>${s.name}
+        <span class="how">${s.how}</span></figcaption>
+    </figure>`);
+});
+</script>
