@@ -1,0 +1,258 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spice-lanes 見本20 ── 輪郭を捨てて、明暗で分ける</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#171a21;color:#eef1f5;
+     font:14px/1.6 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+header{padding:16px 20px;border-bottom:1px solid #262b35}
+h1{margin:0 0 4px;font-size:15px;letter-spacing:.04em}
+header p{margin:0;font-size:12px;color:#9aa4b2}
+.q{margin:12px 20px 0;padding:10px 14px;border-left:3px solid #f0a63c;background:#1e222b;
+   border-radius:0 6px 6px 0;font-size:12.5px;color:#d8dee8;max-width:84ch}
+#hero{display:block;width:100%;max-width:960px;margin:14px auto 0;border-radius:16px;
+      border:1px solid #262b35;box-shadow:0 14px 46px rgba(0,0,0,.55)}
+.bar{display:flex;gap:8px;justify-content:center;padding:11px 20px 0;flex-wrap:wrap}
+button{font:inherit;font-size:12.5px;padding:7px 14px;border-radius:20px;border:1px solid #3b414d;
+       background:#1d212a;color:#e6e6e6;cursor:pointer}
+button.on{background:#f0a63c;border-color:#f0a63c;color:#1b1408;font-weight:700}
+.cmp{display:flex;gap:12px;justify-content:center;align-items:flex-end;padding:16px 20px 0;flex-wrap:wrap}
+.cmp figure{margin:0;text-align:center}
+.cmp canvas{display:block;border:1px solid #262b35;border-radius:8px}
+.cmp figcaption{font-size:10.5px;color:#79828f;margin-top:5px;max-width:180px;line-height:1.5}
+.ng{color:#e08a7a}.ok{color:#7ad0a8}
+footer{padding:14px 20px 26px;font-size:12px;color:#79828f;max-width:80ch}
+b{color:#eef1f5}
+</style>
+
+<header>
+  <h1>spice-lanes 見本20 ── 輪郭を捨てて、明暗で分ける</h1>
+  <p>参考の絵から採ったのは五つ。<b>輪郭を捨てる／段で塗る／分ける線を明るくする／水に浸ける／海を濃くする</b>。</p>
+</header>
+
+<div class="q">
+  <b>形を分けているのが「暗い線」ではなく「明るい部材」だった。</b>
+  手すり・縁飾り・帆桁がクリームや金で、そこが光って形の境になっている。
+  こちらは同じ場所に<b>暗い輪郭</b>を引いていたので、絵が締まる代わりに重くなっていた。<br>
+  <span style="color:#9aa4b2">比率は近かった ── マストは船体長の約0.6倍、水面からの全高は約0.83倍。<b>高さではなく塗り方が違った。</b></span>
+</div>
+
+<canvas id="hero"></canvas>
+<div class="bar" id="bar"></div>
+<div class="cmp" id="cmp"></div>
+
+<footer>
+  <b>色の作り。</b>面ごとに<b>基準色・影・光</b>の三段だけ持たせ、境目に線を引かない。
+  木は暖色、帆はクリーム、差し色は赤（帯と旗だけ）。<br>
+  <b>海を濃い青に変えられる。</b>暖色の船との明度差が開くほど、輪郭が無くても形が立つ。
+</footer>
+
+<script>
+/* ══ 色（面ごとに三段） ══════════════════════════════ */
+const P={
+  wood:['#b5763a','#8a5122','#d8a463'],   /* 基準・影・光 */
+  wood2:['#a8703a','#7d4d24','#c99257'],
+  trim:['#f2e6cf','#d8c39f','#fffaf0'],
+  band:['#c8382e','#9d2a22','#e2564a'],
+  sail:['#f6efdc','#dccfb1','#fffdf4'],
+  mast:['#a8703a','#7d4d24','#c99257'],
+  flag:['#e03a2e','#a82a20','#f4685a'],
+  win :['#7fd8e8','#3f9fb8','#bff0f8'],
+  hullDark:'#6d3d18'
+};
+let SIL=false, DEEP=true;
+const fill=(g,c)=>{ g.fillStyle=SIL?'#000':c; g.fill(); };
+
+/* ══ 船：輪郭なし。明暗の段だけで分ける ══════════════
+   長さの基準は「船体長 = 68」。マストは船体長の約0.6倍       */
+function shipRef(g,s){
+  const w=x=>x*s;
+  const px=(x,y,ww,hh,c)=>{ g.beginPath(); g.rect(w(x),w(y),w(ww),w(hh)); fill(g,c); };
+  /* ── 帆（大・中・小）。ふくらみは片側だけに寄せる ── */
+  const sail=(cx,top,bot,hw)=>{
+    g.beginPath(); g.moveTo(w(cx),w(top));
+    g.quadraticCurveTo(w(cx+hw*1.5),w(top+(bot-top)*.42),w(cx+hw*.5),w(bot));
+    g.lineTo(w(cx),w(bot)); g.closePath(); fill(g,P.sail[0]);
+    g.beginPath(); g.moveTo(w(cx),w(top));
+    g.quadraticCurveTo(w(cx+hw*.55),w(top+(bot-top)*.5),w(cx+hw*.18),w(bot));
+    g.lineTo(w(cx),w(bot)); g.closePath(); fill(g,P.sail[1]);
+    g.beginPath(); g.moveTo(w(cx+hw*1.02),w(top+(bot-top)*.36));
+    g.quadraticCurveTo(w(cx+hw*1.32),w(top+(bot-top)*.5),w(cx+hw*.86),w(bot-1));
+    g.quadraticCurveTo(w(cx+hw*1.06),w(top+(bot-top)*.6),w(cx+hw*1.02),w(top+(bot-top)*.36));
+    g.closePath(); fill(g,P.sail[2]); };
+  /* ── 帆柱 ── */
+  const mast=(x,top,bw)=>{ px(x-bw/2,top,bw,-top+8,P.mast[0]);
+    px(x-bw/2,top,bw*.42,-top+8,P.mast[2]); px(x+bw*.2,top,bw*.3,-top+8,P.mast[1]); };
+  /* 後ろの短い柱 */
+  mast(-22,-26,2.6);
+  sail(-22,-25,-8,7);
+  /* 主柱 */
+  mast(2,-42,3.6);
+  sail(2,-41,-9,15);
+  /* 前の中くらい */
+  mast(-11,-33,3);
+  sail(-11,-32,-9,10.5);
+  /* 帆桁（明るい部材が形を分ける） */
+  [[-22,-25,7],[2,-41,15],[-11,-32,10.5]].forEach(([x,y,hw])=>
+    px(x-hw*.35,y-1,hw*1.5,1.6,P.trim[0]));
+  /* 見張り台 */
+  px(-1.5,-45,7,3.4,P.trim[0]); px(-1.5,-45,7,1.2,P.trim[2]);
+  /* 旗（三本） */
+  [[2,-52,6],[-11,-40,5],[16,-31,4.6]].forEach(([x,y,l])=>{
+    px(x-.5,y,1,7,P.mast[1]);
+    g.beginPath(); g.moveTo(w(x+.5),w(y+.4)); g.lineTo(w(x+l),w(y+1.9));
+    g.lineTo(w(x+.5),w(y+3.4)); g.closePath(); fill(g,P.flag[0]);
+    g.beginPath(); g.moveTo(w(x+.5),w(y+.4)); g.lineTo(w(x+l*.5),w(y+1.2));
+    g.lineTo(w(x+.5),w(y+1.9)); g.closePath(); fill(g,P.trim[2]); });
+  /* ── 船体：喫水線で切る（下は描かない） ── */
+  g.save(); g.beginPath(); g.rect(w(-60),w(-70),w(120),w(78)); g.clip();
+  g.beginPath();
+  g.moveTo(w(-34),w(-9)); g.lineTo(w(-34),w(4));
+  g.quadraticCurveTo(w(-18),w(12),w(4),w(12)); g.quadraticCurveTo(w(24),w(12),w(33),w(1));
+  g.lineTo(w(32),w(-9)); g.closePath(); fill(g,P.wood[0]);
+  /* 影の段（下half）と光の段（上端） */
+  g.save(); g.clip();
+  px(-40,4,90,10,P.hullDark);
+  px(-40,-9,90,2.4,P.wood[2]);
+  px(-40,-4.6,90,3.2,P.band[0]); px(-40,-4.6,90,1.1,P.band[2]);
+  for(let i=-30;i<32;i+=6) px(i,-1,4.4,.9,P.wood[1]);      /* 板目 */
+  g.restore();
+  /* 舷の手すり（明るい部材） */
+  px(-34,-11,66,2.2,P.trim[0]); px(-34,-11,66,.9,P.trim[2]);
+  for(let i=-30;i<28;i+=7) px(i,-11,1.2,3.4,P.trim[1]);
+  /* 船尾楼 */
+  g.beginPath(); g.moveTo(w(8),w(-11)); g.lineTo(w(8),w(-24)); g.lineTo(w(31),w(-24));
+  g.lineTo(w(32),w(-11)); g.closePath(); fill(g,P.wood2[0]);
+  px(8,-24,24,2,P.trim[0]); px(8,-24,24,.8,P.trim[2]);
+  px(8,-14,24,2.6,P.band[0]);
+  [12,17,22,27].forEach(x=>{ px(x,-21,3,3,P.win[1]); px(x+.4,-20.6,2.2,2.2,P.win[0]); });
+  [14,19,24].forEach(x=>{ g.beginPath(); g.arc(w(x),w(-6),w(1.7),0,7); fill(g,P.win[1]);
+    g.beginPath(); g.arc(w(x),w(-6.3),w(1.1),0,7); fill(g,P.win[0]); });
+  /* 舳先 */
+  g.beginPath(); g.moveTo(w(-34),w(-8)); g.lineTo(w(-49),w(-1)); g.lineTo(w(-34),w(1));
+  g.closePath(); fill(g,P.wood[1]);
+  g.beginPath(); g.arc(w(-36),w(-8),w(3.4),0,7); fill(g,P.trim[0]);
+  g.beginPath(); g.arc(w(-36.6),w(-8.6),w(1.4),0,7); fill(g,P.win[1]);
+  g.restore();
+  /* 喫水の泡（明るい部材が船を水に沈める） */
+  g.beginPath(); g.moveTo(w(-46),w(6)); g.quadraticCurveTo(w(-22),w(1),w(2),w(6));
+  g.quadraticCurveTo(w(24),w(11),w(46),w(4));
+  g.strokeStyle=SIL?'#000':'#ffffff'; g.lineWidth=w(3.4); g.lineCap='round'; g.stroke();
+  g.beginPath(); g.moveTo(w(-38),w(9)); g.quadraticCurveTo(w(-10),w(5),w(16),w(9));
+  g.strokeStyle=SIL?'#000':'rgba(255,255,255,.62)'; g.lineWidth=w(2); g.stroke();
+}
+/* 見本18（輪郭あり）を比べる用に */
+const OUT='#2a1c14';
+function shipOutline(g,s){
+  const w=x=>x*s, K=(ww)=>{ g.strokeStyle=SIL?'#000':OUT; g.lineWidth=ww;
+    g.lineJoin='round'; g.lineCap='round'; g.stroke(); };
+  g.beginPath(); g.moveTo(w(-33),w(-7)); g.lineTo(w(-33),w(4));
+  g.quadraticCurveTo(w(-18),w(12),w(3),w(12.5)); g.quadraticCurveTo(w(24),w(12),w(34),w(1));
+  g.lineTo(w(33),w(-7)); g.closePath(); fill(g,'#c4643c'); K(w(3.6));
+  g.beginPath(); g.moveTo(w(-33),w(-7)); g.lineTo(w(-33),w(-21)); g.lineTo(w(-16),w(-21));
+  g.lineTo(w(-14),w(-7)); g.closePath(); fill(g,'#f5cf8e'); K(w(3.2));
+  [[-12,-30],[3,-48],[19,-38]].forEach(([x,t])=>{ g.beginPath();
+    g.moveTo(w(x),w(t)); g.lineTo(w(x),w(-5)); K(w(3.4)); });
+  g.beginPath(); g.moveTo(w(-11),w(-45)); g.lineTo(w(17),w(-45));
+  g.quadraticCurveTo(w(24),w(-30),w(22),w(-12)); g.quadraticCurveTo(w(3),w(-7),w(-16),w(-12));
+  g.quadraticCurveTo(w(-18),w(-30),w(-11),w(-45)); g.closePath(); fill(g,'#fdfbf2'); K(w(3.2));
+  g.beginPath(); g.moveTo(w(-12),w(-29)); g.lineTo(w(-12),w(-9)); g.lineTo(w(-31),w(-13));
+  g.closePath(); fill(g,'#fdfbf2'); K(w(3));
+}
+
+/* ══ 地図（船以外は見本18のまま。海の色だけ切り替え） ══ */
+const ISLES=[
+ {x:-250,z:-165,r:92,seed:3,name:'ベルヌ',good:'羊毛',props:[[-.3,-.15],[.24,.2],[.46,-.26]]},
+ {x: 250,z: 140,r:72,seed:9,name:'サンティラ',good:'丁子',props:[[0,0],[-.4,.3]]},
+ {x: 195,z:-255,r:52,seed:17,name:'アズハル',good:'龍涎香',props:[[0,-.1]]},
+ {x:-330,z: 248,r:60,seed:23,name:'モルガ',good:'黒檀',props:[[.1,.1]]}
+];
+const PATH=[[-250,-165],[-30,-30],[250,140]];
+const shape=(is,k)=>{ const a=k*Math.PI*2,
+  j=.9+.14*Math.sin(k*12+is.seed)+.07*Math.sin(k*29+is.seed*2);
+  return [is.x+Math.cos(a)*is.r*j, is.z+Math.sin(a)*is.r*j]; };
+let T=0;
+function render(cv){
+  const dpr=Math.min(2,devicePixelRatio||1), w=cv.clientWidth||300, h=Math.round(w*.58);
+  cv.width=w*dpr; cv.height=h*dpr;
+  const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  const S=w/900, px=x=>w/2+x*S, py=z=>h/2+z*S;
+  const SEA=DEEP?['#1b62c8','#144fa8']:['#2fb0d0','#249ec0'];
+  g.fillStyle=SEA[0]; g.fillRect(0,0,w,h);
+  g.fillStyle=SEA[1];
+  for(let i=0;i<16;i++){ const yy=(i*42+T*8)%(h+40)-20; g.fillRect(0,yy,w,Math.max(2,3*S*2)); }
+  g.fillStyle='rgba(255,255,255,.35)';
+  for(let i=0;i<10;i++){ const yy=(i*70+T*8)%(h+60)-20, xx=((i*233)%w);
+    g.fillRect(xx,yy,Math.max(10,34*S*2),Math.max(1.4,2*S*2)); }
+  /* 航路 */
+  const A=ISLES[0],B=ISLES[1];
+  g.save(); g.setLineDash([9*S*2,8*S*2]); g.lineDashOffset=-T*22*S*2;
+  g.beginPath(); g.moveTo(px(A.x),py(A.z)); g.lineTo(px(B.x),py(B.z));
+  g.strokeStyle='#ffd77a'; g.lineWidth=Math.max(2.4,5*S*2); g.lineCap='round'; g.stroke(); g.restore();
+  /* 島：輪郭を捨て、段だけで */
+  ISLES.forEach(is=>{
+    const pts=[]; for(let k=0;k<44;k++) pts.push(shape(is,k/44));
+    const path=(f,dx=0,dy=0)=>{ g.beginPath();
+      pts.forEach(([x,z],i)=>{ const X=px(is.x+(x-is.x)*f)+dx, Y=py(is.z+(z-is.z)*f)+dy;
+        i?g.lineTo(X,Y):g.moveTo(X,Y); }); g.closePath(); };
+    path(1.06); g.fillStyle='rgba(255,255,255,.55)'; g.fill();
+    path(1); g.fillStyle='#f0d79a'; g.fill();
+    path(.95,0,3*S*2); g.fillStyle='#d8b673'; g.fill();
+    path(.76); g.fillStyle='#4f9a52'; g.fill();
+    path(.72,0,-2*S*2); g.fillStyle='#6ec06a'; g.fill();
+    path(.44,-1*S*2,-3*S*2); g.fillStyle='#96dc86'; g.fill();
+  });
+  /* 船 */
+  const u=(T*.05)%2, seg=u<1?0:1, uu=u<1?u:u-1, e=uu*uu*(3-2*uu);
+  const a0=PATH[seg], b0=PATH[seg+1];
+  const sx=a0[0]+(b0[0]-a0[0])*e, sz=a0[1]+(b0[1]-a0[1])*e;
+  g.save(); g.translate(px(sx),py(sz)+Math.sin(T*2.4)*2);
+  if((b0[0]-a0[0])<0) g.scale(-1,1);
+  shipRef(g,S*2*.62); g.restore();
+  /* 名札 */
+  ISLES.forEach(is=>{ const X=px(is.x), Y=py(is.z)-is.r*S*.62;
+    g.font=`700 ${12*S*2}px system-ui,sans-serif`;
+    const tw=g.measureText(is.name).width, ww=tw+26*S*2, hh=24*S*2, x=X-ww/2, y=Y-hh/2;
+    g.beginPath(); g.moveTo(x+hh/2,y); g.arcTo(x+ww,y,x+ww,y+hh,hh/2);
+    g.arcTo(x+ww,y+hh,x,y+hh,hh/2); g.arcTo(x,y+hh,x,y,hh/2); g.arcTo(x,y,x+ww,y,hh/2);
+    g.closePath(); g.fillStyle='rgba(255,250,238,.95)'; g.fill();
+    g.fillStyle='#3a2a1c'; g.textAlign='center'; g.textBaseline='middle';
+    g.fillText(is.name,X,y+hh*.42);
+    g.font=`600 ${9*S*2}px system-ui,sans-serif`; g.fillStyle='rgba(58,42,28,.6)';
+    g.fillText(is.good,X,y+hh*.76); g.textAlign='start'; });
+}
+
+/* ── 比べる ── */
+const cmp=document.getElementById('cmp');
+function cell(fn,sc,sil,bg,label,cls){
+  const cv=document.createElement('canvas'), dpr=2, W=170, H=126;
+  cv.width=W*dpr; cv.height=H*dpr; cv.style.width=W+'px'; cv.style.height=H+'px';
+  const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  g.fillStyle=sil?'#fff':bg; g.fillRect(0,0,W,H);
+  const keep=SIL; SIL=sil;
+  g.save(); g.translate(W/2,H*.62); fn(g,sc); g.restore();
+  SIL=keep;
+  const f=document.createElement('figure'); f.appendChild(cv);
+  const c=document.createElement('figcaption'); c.innerHTML=`<span class="${cls}">■</span> ${label}`;
+  f.appendChild(c); cmp.appendChild(f);
+}
+function buildCmp(){
+  cmp.innerHTML='';
+  const bg=DEEP?'#1b62c8':'#2fb0d0';
+  cell(shipOutline,.62,false,bg,'前：暗い輪郭あり（地図の大きさ）','ng');
+  cell(shipRef,.62,false,bg,'後：輪郭なし・明暗の段（同じ大きさ）','ok');
+  cell(shipOutline,1.35,false,bg,'前：拡大','ng');
+  cell(shipRef,1.35,false,bg,'後：拡大','ok');
+  cell(shipRef,.62,true,'#fff','後：黒シルエット','ok');
+}
+const bar=document.getElementById('bar');
+[['海を濃い青に',()=>DEEP=true],['海を水色に',()=>DEEP=false]].forEach(([l,f],i)=>{
+  const b=document.createElement('button'); b.textContent=l; if(!i) b.className='on';
+  b.onclick=()=>{ f(); [...bar.children].forEach(c=>c.className=''); b.className='on'; buildCmp(); };
+  bar.appendChild(b); });
+
+const hero=document.getElementById('hero');
+addEventListener('resize',()=>render(hero));
+buildCmp();
+(function frame(){ T+=1/60; render(hero); requestAnimationFrame(frame); })();
+</script>
