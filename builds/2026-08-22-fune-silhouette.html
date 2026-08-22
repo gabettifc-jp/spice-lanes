@@ -1,0 +1,285 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spice-lanes 見本9 ── 調べた規則から船を作り直す</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#171a21;color:#eef1f5;
+     font:14px/1.6 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+header{padding:16px 20px;border-bottom:1px solid #262b35}
+h1{margin:0 0 4px;font-size:15px;letter-spacing:.04em}
+header p{margin:0;font-size:12px;color:#9aa4b2}
+.rule{margin:12px 20px 0;padding:10px 14px;border-left:3px solid #f0a63c;background:#1e222b;
+      border-radius:0 6px 6px 0;font-size:12.5px;color:#d8dee8}
+#hero{display:block;width:100%;max-width:820px;margin:14px auto 0;border-radius:14px;
+      border:1px solid #262b35;cursor:grab;box-shadow:0 12px 40px rgba(0,0,0,.5)}
+#hero:active{cursor:grabbing}
+.bar{display:flex;gap:8px;justify-content:center;padding:10px 20px 2px;flex-wrap:wrap}
+button{font:inherit;font-size:12.5px;padding:7px 14px;border-radius:20px;border:1px solid #3b414d;
+       background:#1d212a;color:#e6e6e6;cursor:pointer}
+button.on{background:#f0a63c;border-color:#f0a63c;color:#1b1408;font-weight:700}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(238px,1fr));gap:11px;padding:14px 20px 8px}
+figure{margin:0;border:1px solid #262b35;border-radius:10px;overflow:hidden;background:#0f1218}
+figure canvas{display:block;width:100%;height:auto}
+figcaption{padding:7px 9px 9px;font-size:11.5px;border-top:1px solid #262b35}
+.how{color:#79828f;font-size:10.5px;display:block;margin-top:2px;line-height:1.5}
+.ng{color:#e08a7a}.ok{color:#7ad0a8}
+footer{padding:8px 20px 26px;font-size:12px;color:#79828f;max-width:76ch}
+b{color:#eef1f5} code{background:#22262f;padding:1px 5px;border-radius:3px;font-size:11.5px}
+</style>
+
+<header>
+  <h1>spice-lanes 見本9 ── 調べた規則から船を作り直す</h1>
+  <p>質感は一切いじっていない。<b>形だけ</b>を、調べた相場どおりに作り直した。</p>
+</header>
+
+<div class="rule">
+  <b>真っ黒のシルエットにして見分けがつかないなら、形の言語が失敗している。どれだけ質感を磨いても取り返せない。</b><br>
+  <span style="color:#9aa4b2">出どころは <code>gamedev/references/art-stylized.md</code>。この一行が、見本8（質感16通り）を名指しで否定している。</span>
+</div>
+
+<canvas id="hero"></canvas>
+<div class="bar" id="bar"></div>
+<div class="grid" id="grid"></div>
+
+<footer>
+  <b>相場から採って、形に落としたのは六つ。</b><br>
+  ① 帆をもっと大きく（帆の高さ＝船体長の1.15倍）　② 細部は大きくまとめる（帆柱 3本→<b>1本</b>、帆 3枚→<b>2枚</b>）<br>
+  ③ 箱っぽい形（船尾に四角い船楼を乗せて、シルエットに段差を作る）　④ 色の変化は三つまで<br>
+  ⑤ 値域は明るいほうへ　⑥ 面を減らす（船 約1,600面 → <b>約320面</b>）<br><br>
+  上のボタンで<b>黒／灰／通常</b>を切り替えられる。<b>黒にして、それでも船に見えるかで判定してほしい。</b>
+</footer>
+
+<script>
+/* ══ 3D ══════════════════════════════════════════════ */
+const V=(x,y,z)=>({x,y,z}), MM=()=>({v:[],f:[]});
+const P=(m,p)=>(m.v.push(p),m.v.length-1);
+const Q=(m,a,b,c,d,col)=>m.f.push({i:[a,b,c,d],c:col});
+const Tr=(m,a,b,c,col)=>m.f.push({i:[a,b,c],c:col});
+function smooth(m){ const nv=m.v.map(()=>({x:0,y:0,z:0}));
+  m.f.forEach(f=>{ const a=m.v[f.i[0]],b=m.v[f.i[1]],c=m.v[f.i[2]];
+    const ux=b.x-a.x,uy=b.y-a.y,uz=b.z-a.z,vx=c.x-a.x,vy=c.y-a.y,vz=c.z-a.z;
+    let nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;
+    const L=Math.hypot(nx,ny,nz)||1; f.n={x:nx/L,y:ny/L,z:nz/L};
+    f.i.forEach(i=>{nv[i].x+=f.n.x;nv[i].y+=f.n.y;nv[i].z+=f.n.z;}); });
+  m.n=nv.map(n=>{const L=Math.hypot(n.x,n.y,n.z)||1;return{x:n.x/L,y:n.y/L,z:n.z/L};}); return m; }
+function cyl(m,cx,cy,cz,r0,r1,hgt,col,SEG=8){ const a=[],b=[];
+  for(let k=0;k<SEG;k++){ const t=k/SEG*Math.PI*2;
+    a.push(P(m,V(cx+Math.cos(t)*r0,cy,cz+Math.sin(t)*r0)));
+    b.push(P(m,V(cx+Math.cos(t)*r1,cy-hgt,cz+Math.sin(t)*r1))); }
+  for(let k=0;k<SEG;k++) Q(m,a[k],a[(k+1)%SEG],b[(k+1)%SEG],b[k],col);
+  const c=P(m,V(cx,cy-hgt,cz)); for(let k=0;k<SEG;k++) Tr(m,b[k],b[(k+1)%SEG],c,col); }
+function box(m,x0,y0,z0,x1,y1,z1,col){
+  const p=[[x0,y0,z0],[x1,y0,z0],[x1,y0,z1],[x0,y0,z1],[x0,y1,z0],[x1,y1,z0],[x1,y1,z1],[x0,y1,z1]]
+    .map(q=>P(m,V(q[0],q[1],q[2])));
+  Q(m,p[0],p[1],p[2],p[3],col); Q(m,p[7],p[6],p[5],p[4],col);
+  Q(m,p[4],p[5],p[1],p[0],col); Q(m,p[6],p[7],p[3],p[2],col);
+  Q(m,p[5],p[6],p[2],p[1],col); Q(m,p[7],p[4],p[0],p[3],col); }
+
+/* 色は三つ＋差し色ひとつ（相場：色の変化は二つか三つ） */
+const C={ hull:[198,96,60], deck:[246,206,138], sail:[255,252,244], accent:[248,86,96],
+          sea:[46,190,214], sea2:[24,150,190] };
+
+/* ── 新しい船：規則から作る ──────────────────
+   主形状＝角を落とした台形の塊（箱寄り）／副形状＝大きな円弧（帆）
+   禁じ手＝細い線（ロープ・細いマスト・手すり）は作らない            */
+function shipNew(){
+  const m=MM(), LEN=48, N=6, RN=6;                 /* 断面は6枚だけ（低ポリ） */
+  const wid=z=>22*Math.pow(Math.max(0,1-Math.pow(Math.abs(z)/(LEN*1.1),2.6)),.34)+4;
+  const dep=z=>13.5;
+  const sheer=z=>-Math.pow(Math.abs(z)/LEN,1.7)*16;   /* 舷が大きく反り上がる */
+  const ring=[];
+  for(let s=0;s<=N;s++){ const z=-LEN+s*(2*LEN/N), w=wid(z), h=dep(z), sh=sheer(z), r=[];
+    /* 角を落とした台形：舷→肩→底→肩→舷 */
+    r.push(P(m,V(-w,        sh,        z)));
+    r.push(P(m,V(-w*.92,    sh-h*.55,  z)));
+    r.push(P(m,V(-w*.58,    sh-h,      z)));
+    r.push(P(m,V( w*.58,    sh-h,      z)));
+    r.push(P(m,V( w*.92,    sh-h*.55,  z)));
+    r.push(P(m,V( w,        sh,        z)));
+    ring.push(r); }
+  for(let s=0;s<N;s++){ for(let k=0;k<RN-1;k++)
+      Q(m,ring[s][k],ring[s][k+1],ring[s+1][k+1],ring[s+1][k],C.hull);
+    Q(m,ring[s][0],ring[s][RN-1],ring[s+1][RN-1],ring[s+1][0],C.deck); }
+  [0,N].forEach((s,n)=>{ const z=-LEN+s*(2*LEN/N), r=ring[s];
+    const c=P(m,V(0,sheer(z)-dep(z)*.4,z+(n?14:-8)));   /* 船首を長く突き出す */
+    for(let k=0;k<RN-1;k++) n?Tr(m,r[k],r[k+1],c,C.hull):Tr(m,r[k+1],r[k],c,C.hull);
+    Tr(m,r[0],r[RN-1],c,C.deck); });
+
+  /* ③ 箱っぽい船楼を船尾に。シルエットに段差が生まれる */
+  box(m,-16,sheer(-38),-46,16,sheer(-38)-20,-24,C.deck);
+  box(m,-13,sheer(-38)-20,-43,13,sheer(-38)-30,-27,C.hull);
+
+  /* ② 帆柱は一本だけ。太く */
+  const MZ=4, MH=104;
+  cyl(m,0,sheer(MZ)-6,MZ,5,3.2,MH,C.deck,8);
+  /* ① 帆は大小二枚。大きい（帆の高さ＝船体長の1.15倍） */
+  const sail=(top,bot,halfW,bul)=>{
+    const NX=8,NY=5,g=[];
+    for(let j=0;j<=NY;j++){ const row=[];
+      for(let k=0;k<=NX;k++){ const tx=k/NX*2-1, ty=j/NY;
+        const b=Math.cos(tx*Math.PI/2)*Math.sin((1-ty)*Math.PI*.92)*bul;
+        row.push(P(m,V(tx*halfW, top+(bot-top)*ty, MZ-5-b))); } g.push(row); }
+    for(let j=0;j<NY;j++) for(let k=0;k<NX;k++)
+      Q(m,g[j][k],g[j][k+1],g[j+1][k+1],g[j+1][k],C.sail);
+    box(m,-halfW-2,top+2,MZ-6,halfW+2,top-2,MZ-4,C.deck); };
+  sail(-96,-64,26,10);                 /* 上の小さい帆 */
+  sail(-60,-14,36,16);                 /* 下の大きい帆 */
+  /* 見張り台（シルエットに読みを足す小さな塊） */
+  cyl(m,0,-98,MZ,8,8,7,C.deck,8);
+  /* 旗は大きく。差し色はここだけ */
+  const f0=P(m,V(0,-124,MZ)),f1=P(m,V(0,-110,MZ)),f2=P(m,V(0,-117,MZ-40));
+  Tr(m,f0,f1,f2,C.accent);
+  cyl(m,0,-104,MZ,1.8,1.8,22,C.deck,6);
+  return smooth(m);
+}
+
+/* ── 前の船（見本7・8のもの）を比較のために ── */
+function shipOld(){
+  const m=MM(), N=20, LEN=48;
+  const wid=z=>19*Math.pow(Math.max(0,1-Math.pow(Math.abs(z)/(LEN*1.06),2.4)),.5)+3.5;
+  const dep=z=>15*Math.pow(Math.max(0,1-Math.pow(Math.abs(z)/(LEN*1.16),2.8)),.42)+2;
+  const sheer=z=>-Math.pow(Math.abs(z)/LEN,2.2)*11;
+  const RN=9, ring=[];
+  for(let s=0;s<=N;s++){ const z=-LEN+s*(2*LEN/N),w=wid(z),h=dep(z),sh=sheer(z),r=[];
+    for(let k=0;k<RN;k++){ const a=Math.PI*k/(RN-1); r.push(P(m,V(-Math.cos(a)*w,sh-Math.sin(a)*h,z))); }
+    ring.push(r); }
+  for(let s=0;s<N;s++){ for(let k=0;k<RN-1;k++)
+      Q(m,ring[s][k],ring[s][k+1],ring[s+1][k+1],ring[s+1][k],C.hull);
+    Q(m,ring[s][0],ring[s][RN-1],ring[s+1][RN-1],ring[s+1][0],C.deck); }
+  [[-20,66,22,17],[6,86,27,21],[26,58,19,15]].forEach(([mz,hgt,sw,sh])=>{
+    cyl(m,0,sheer(mz)-2,mz,2.8,1.9,hgt,C.deck,10);
+    const NX=12,NY=9,top=-hgt*.94,bot=-hgt*.2,g=[];
+    for(let j=0;j<=NY;j++){ const row=[];
+      for(let k=0;k<=NX;k++){ const tx=k/NX*2-1,ty=j/NY;
+        const b=Math.cos(tx*Math.PI/2)*Math.sin((1-ty)*Math.PI*.9)*sh;
+        row.push(P(m,V(tx*sw,top+(bot-top)*ty,mz-3-b))); } g.push(row); }
+    for(let j=0;j<NY;j++) for(let k=0;k<NX;k++)
+      Q(m,g[j][k],g[j][k+1],g[j+1][k+1],g[j+1][k],C.sail); });
+  Tr(m,P(m,V(0,-90,2)),P(m,V(0,-80,2)),P(m,V(0,-84,-22)),C.accent);
+  return smooth(m);
+}
+function ocean(){ const m=MM(), N=24, S=460;
+  const h=(x,z)=>Math.sin(x/40)*2.2+Math.cos(z/34)*1.9;
+  const g=[]; for(let j=0;j<=N;j++){ const row=[];
+    for(let k=0;k<=N;k++){ const x=-S/2+k*S/N,z=-S/2+j*S/N; row.push(P(m,V(x,h(x,z)+10,z))); } g.push(row); }
+  for(let j=0;j<N;j++) for(let k=0;k<N;k++){ const d=Math.hypot(-S/2+k*S/N,-S/2+j*S/N)/(S*.55);
+    Q(m,g[j][k],g[j][k+1],g[j+1][k+1],g[j+1][k], d>.75?C.sea2:C.sea); }
+  return smooth(m); }
+
+const NEW=shipNew(), OLD=shipOld(), SEA=ocean();
+const cnt=m=>m.f.length;
+
+/* ══ 描く ══════════════════════════════════════════ */
+const cl=v=>v<0?0:v>255?255:v|0;
+const L={x:-.42,y:-.84,z:.34}; (()=>{const n=Math.hypot(L.x,L.y,L.z);L.x/=n;L.y/=n;L.z/=n;})();
+
+function render(cv,o){
+  const {yaw=.62,pitch=.58,zoom=1,mode='color',which='new',sea=true,ratio=.62,ui=false}=o;
+  const dpr=Math.min(2,devicePixelRatio||1), w=cv.clientWidth||240, h=Math.round(w*ratio);
+  cv.width=w*dpr; cv.height=h*dpr;
+  const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  if(mode==='sil'){ g.fillStyle='#ffffff'; g.fillRect(0,0,w,h); }
+  else { const G=g.createLinearGradient(0,0,0,h);
+    if(mode==='gray'){ G.addColorStop(0,'#d8d8d8'); G.addColorStop(1,'#f2f2f2'); }
+    else { G.addColorStop(0,'#7fd8f0'); G.addColorStop(1,'#cff2fb'); }
+    g.fillStyle=G; g.fillRect(0,0,w,h); }
+
+  const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const sc=(w/300)*1.05*zoom;
+  const proj=p=>{ const x=p.x*cy+p.z*sy, z=-p.x*sy+p.z*cy;
+    return {sx:w/2+x*sc, sy:h*.66+(p.y*cp-z*sp)*sc, d:p.y*sp+z*cp}; };
+
+  function mesh(m,olcol,two){
+    const pr=m.v.map(proj);
+    const vi=m.n.map(n=>Math.max(0,-(n.x*L.x+n.y*L.y+n.z*L.z)));
+    const list=m.f.map(f=>({f,d:f.i.reduce((s,i)=>s+pr[i].d,0)/f.i.length})).sort((a,b)=>b.d-a.d);
+    if(mode==='sil'){                                   /* 真っ黒のシルエット */
+      g.beginPath();
+      list.forEach(({f})=>{ const p=f.i.map(i=>pr[i]);
+        g.moveTo(p[0].sx,p[0].sy); for(let i=1;i<p.length;i++) g.lineTo(p[i].sx,p[i].sy); g.closePath(); });
+      g.fillStyle='#000'; g.strokeStyle='#000'; g.lineWidth=1.4; g.fill(); g.stroke(); return; }
+    g.save(); g.beginPath();
+    list.forEach(({f})=>{ const p=f.i.map(i=>pr[i]);
+      g.moveTo(p[0].sx,p[0].sy); for(let i=1;i<p.length;i++) g.lineTo(p[i].sx,p[i].sy); g.closePath(); });
+    g.strokeStyle=olcol; g.lineWidth=4.5; g.lineJoin='round'; g.stroke(); g.restore();
+    for(const {f} of list){
+      const p=f.i.map(i=>pr[i]);
+      const cr=(p[1].sx-p[0].sx)*(p[2].sy-p[0].sy)-(p[1].sy-p[0].sy)*(p[2].sx-p[0].sx);
+      if(cr>0 && !two) continue;
+      let lo=0,hi=0; f.i.forEach((idx,n)=>{ if(vi[idx]<vi[f.i[lo]])lo=n; if(vi[idx]>vi[f.i[hi]])hi=n; });
+      const kA=.66+vi[f.i[lo]]*.52, kB=.66+vi[f.i[hi]]*.52;
+      const col=k=>{ let c=[f.c[0]*k+16,f.c[1]*k+16,f.c[2]*k+16];
+        if(mode==='gray'){ const m2=c[0]*.299+c[1]*.587+c[2]*.114; c=[m2,m2,m2]; }
+        return `rgb(${cl(c[0])},${cl(c[1])},${cl(c[2])})`; };
+      g.beginPath(); g.moveTo(p[0].sx,p[0].sy);
+      for(let n=1;n<p.length;n++) g.lineTo(p[n].sx,p[n].sy); g.closePath();
+      if(Math.abs(kA-kB)<.02) g.fillStyle=col((kA+kB)/2);
+      else { const gr=g.createLinearGradient(p[lo].sx,p[lo].sy,p[hi].sx,p[hi].sy);
+        gr.addColorStop(0,col(kA)); gr.addColorStop(1,col(kB)); g.fillStyle=gr; }
+      g.strokeStyle=col((kA+kB)/2); g.lineWidth=.7; g.fill(); g.stroke(); }
+  }
+  const dark=c=>{ let x=[c[0]*.42,c[1]*.42,c[2]*.42];
+    if(mode==='gray'){ const m2=x[0]*.299+x[1]*.587+x[2]*.114; x=[m2,m2,m2]; }
+    return `rgb(${cl(x[0])},${cl(x[1])},${cl(x[2])})`; };
+
+  if(sea && mode!=='sil'){ mesh(SEA,dark(C.sea),true);
+    const c=proj(V(0,10,0)); g.save(); g.beginPath();
+    g.ellipse(c.sx,c.sy,30*sc,30*sc*Math.cos(pitch)*.9,0,0,7);
+    g.fillStyle='rgba(6,30,52,.26)'; g.filter='blur(6px)'; g.fill(); g.restore(); }
+  mesh(which==='new'?NEW:OLD, dark(C.hull), false);
+  if(ui && mode==='color') drawUI(g,w,h);
+}
+function drawUI(g,w,h){
+  const R=(x,y,ww,hh,r)=>{ g.beginPath(); g.moveTo(x+r,y);
+    g.arcTo(x+ww,y,x+ww,y+hh,r); g.arcTo(x+ww,y+hh,x,y+hh,r);
+    g.arcTo(x,y+hh,x,y,r); g.arcTo(x,y,x+ww,y,r); g.closePath(); };
+  const S=w/820;
+  const pill=(x,y,ww,hh,fill,txt,sub)=>{ g.save(); g.shadowColor='rgba(4,18,34,.45)';
+    g.shadowBlur=10; g.shadowOffsetY=4; R(x,y,ww,hh,hh/2); g.fillStyle=fill; g.fill(); g.restore();
+    R(x,y,ww,hh,hh/2); g.strokeStyle='rgba(255,255,255,.75)'; g.lineWidth=2; g.stroke();
+    g.fillStyle='#3a2a1c'; g.textBaseline='middle'; g.font=`700 ${hh*.46}px system-ui,sans-serif`;
+    g.fillText(txt,x+hh*.9,y+hh*.54);
+    g.fillStyle='rgba(58,42,28,.62)'; g.font=`600 ${hh*.30}px system-ui,sans-serif`;
+    g.fillText(sub,x+hh*.9,y+hh*.20); };
+  pill(14*S,14*S,150*S,42*S,'#fff6dc','1,240','所持');
+  pill(w-176*S,14*S,162*S,42*S,'#ffe0e0','4,000','取り立てまで 7');
+  const bt=(cx,cyy,r,fill,label)=>{ g.save(); g.shadowColor='rgba(4,18,34,.5)'; g.shadowBlur=12;
+    g.shadowOffsetY=6; g.beginPath(); g.arc(cx,cyy,r,0,7); g.fillStyle=fill; g.fill(); g.restore();
+    g.fillStyle='#fff'; g.font=`700 ${r*.5}px system-ui,sans-serif`; g.textAlign='center';
+    g.textBaseline='middle'; g.fillText(label,cx,cyy); g.textAlign='start'; };
+  const by=h-38*S, br=28*S;
+  bt(w/2-80*S,by,br,'#4fb8f0','繋ぐ'); bt(w/2,by+4*S,br*1.16,'#f0a63c','出す');
+  bt(w/2+80*S,by,br,'#8f8f9c','待つ');
+}
+
+/* ── 並べる ── */
+const hero=document.getElementById('hero');
+let yaw=.62,pitch=.56,mode='color',drag=null,auto=true;
+const drawHero=()=>render(hero,{yaw,pitch,zoom:2.1,mode,which:'new',ui:true,ratio:.5});
+hero.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,yaw,pitch};auto=false;
+  hero.setPointerCapture(e.pointerId);});
+hero.addEventListener('pointermove',e=>{ if(!drag)return;
+  yaw=drag.yaw+(e.clientX-drag.x)*.008;
+  pitch=Math.max(.18,Math.min(1.2,drag.pitch+(e.clientY-drag.y)*.006)); drawHero(); });
+addEventListener('pointerup',()=>drag=null);
+
+const bar=document.getElementById('bar');
+[['color','通常'],['gray','灰（値の構造を見る）'],['sil','黒（シルエット検査）']].forEach(([k,label],i)=>{
+  const b=document.createElement('button'); b.textContent=label; if(!i) b.className='on';
+  b.onclick=()=>{ mode=k; [...bar.children].forEach(c=>c.className=''); b.className='on';
+    drawHero(); drawAll(); };
+  bar.appendChild(b); });
+
+const grid=document.getElementById('grid'), cells=[];
+[['old','color','前の船（見本7・8）','ng'],['new','color','新しい船','ok'],
+ ['old','sil','前の船 ── 黒','ng'],['new','sil','新しい船 ── 黒','ok']].forEach(([which,fixed,name,cls])=>{
+  const f=document.createElement('figure');
+  f.innerHTML=`<canvas></canvas><figcaption><span class="${cls}">■</span> ${name}
+    <span class="how">面の数 ${which==='new'?cnt(NEW):cnt(OLD)}</span></figcaption>`;
+  grid.appendChild(f); cells.push([f.querySelector('canvas'),which,fixed]); });
+function drawAll(){ cells.forEach(([cv,which,fixed])=>
+  render(cv,{which,mode:fixed,sea:fixed!=='sil',zoom:1.5,ratio:.72})); }
+addEventListener('resize',()=>{drawHero();drawAll();});
+(function tick(){ if(auto){ yaw+=.0013; drawHero(); } requestAnimationFrame(tick); })();
+drawHero(); drawAll();
+</script>
