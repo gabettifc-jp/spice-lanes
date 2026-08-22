@@ -1,0 +1,177 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>見本21 ── 群れる見下ろしの絵が描けるかの試し</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#12141a;color:#eef1f5;
+     font:14px/1.6 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+header{padding:14px 20px;border-bottom:1px solid #262b35}
+h1{margin:0 0 3px;font-size:15px}
+header p{margin:0;font-size:12px;color:#9aa4b2}
+#c{display:block;width:100%;max-width:900px;margin:14px auto 0;border-radius:14px;border:1px solid #262b35}
+footer{padding:12px 20px 24px;font-size:12px;color:#79828f;max-width:78ch}
+b{color:#eef1f5}
+</style>
+<header>
+  <h1>見本21 ── 群れる見下ろしの絵が描けるかの試し</h1>
+  <p>spice-lanes の絵ではない。<b>この画風がコードで出せるか</b>を確かめるためだけのもの。</p>
+</header>
+<canvas id="c"></canvas>
+<footer>
+  画面の中身：地面のタイル／主人公1体／ザコ<b id="n">—</b>体（4種）／弾／被弾の光／
+  ダメージの数字／拾える玉／体力と経験値のバー／時計とレベル。<b>全部コードで描いている。</b>
+</footer>
+<script>
+const CV=document.getElementById('c'), g=CV.getContext('2d');
+let W=900,H=520,DPR=2;
+function fit(){ W=Math.min(900,CV.clientWidth||900); H=Math.round(W*0.58);
+  CV.width=W*DPR; CV.height=H*DPR; g.setTransform(DPR,0,0,DPR,0,0); }
+addEventListener('resize',fit); fit();
+
+const R=(s=>()=>((s=s*16807%2147483647)-1)/2147483646)(20260822);
+const OUT='#1a1420';
+/* ── 色は少なく、役ごとに分ける ── */
+const COL={
+  ground:['#436b3c','#3f663a'], grass:'#4c7a44', dirt:'#6b5a3c',
+  hero:['#ffd76a','#e0a83c'], heroSkin:'#ffe2c0', heroCloak:'#3f7fd8',
+  foe:[['#8f4fd8','#6a34a8'],['#d84f6a','#a83450'],['#4fc9d8','#2f95a8'],['#d8944f','#a86a30']],
+  bullet:'#fff3a0', hit:'#ffffff', orb:'#63e8ff', hp:'#ff5a6a', xp:'#63d8ff'
+};
+/* ── 群れ ── */
+const N=260, foes=[];
+for(let i=0;i<N;i++){ const k=(R()*4)|0, t=R();
+  const type = t<.62?0 : t<.88?1 : 2;                      /* 丸・のっぽ・大物 */
+  foes.push({a:R()*Math.PI*2, r:180+R()*520, k, type,
+             s:(type===2? 15+R()*5 : type===1? 9+R()*2 : 8+R()*3), ph:R()*6.28}); }
+const bullets=[], hits=[], nums=[], orbs=[];
+for(let i=0;i<14;i++) orbs.push({x:(R()-.5)*760, y:(R()-.5)*440, ph:R()*6.28});
+let T=0, lvl=7, xp=.42, hp=.78;
+
+function roundRect(x,y,w,h,r){ g.beginPath(); g.moveTo(x+r,y);
+  g.arcTo(x+w,y,x+w,y+h,r); g.arcTo(x+w,y+h,x,y+h,r);
+  g.arcTo(x,y+h,x,y,r); g.arcTo(x,y,x+w,y,r); g.closePath(); }
+function blob(x,y,rx,ry,fill,line){ g.beginPath(); g.ellipse(x,y,rx,ry,0,0,7);
+  g.fillStyle=fill; g.fill(); if(line){ g.strokeStyle=OUT; g.lineWidth=line; g.stroke(); } }
+
+/* ── ザコ：丸い胴＋目二つ＋足二本。四色 ── */
+function drawFoe(x,y,s,k,t,type=0){
+  const c=COL.foe[k], bob=Math.sin(t*6+x*.05)*s*.12;
+  const ry = type===1? .92 : type===2? .58 : .66;          /* のっぽ／ずんぐり */
+  g.save(); g.translate(x,y+bob);
+  g.beginPath(); g.ellipse(0,s*.9,s*.7,s*.24,0,0,7);
+  g.fillStyle='rgba(10,20,10,.28)'; g.fill();                    /* 影 */
+  g.beginPath(); g.moveTo(-s*.4,s*.5); g.lineTo(-s*.24,s*.9);
+  g.lineTo(-s*.06,s*.5); g.closePath(); g.fillStyle=c[1]; g.fill();
+  g.beginPath(); g.moveTo(s*.06,s*.5); g.lineTo(s*.24,s*.9);
+  g.lineTo(s*.4,s*.5); g.closePath(); g.fillStyle=c[1]; g.fill();
+  blob(0,0,s*(type===2?.78:.62),s*ry,c[0],s*.16);                /* 胴 */
+  if(type===2){ blob(0,-s*.62,s*.2,s*.24,c[1],s*.12);            /* 大物には角 */
+    blob(-s*.4,-s*.5,s*.13,s*.2,c[1],s*.1); blob(s*.4,-s*.5,s*.13,s*.2,c[1],s*.1); }
+  g.beginPath(); g.ellipse(-s*.18,-s*.2,s*.34,s*.3,0,0,7);
+  g.fillStyle='rgba(255,255,255,.22)'; g.fill();                 /* 上の照り */
+  blob(-s*.22,-s*.06,s*.16,s*.19,'#fff',0);
+  blob( s*.22,-s*.06,s*.16,s*.19,'#fff',0);
+  blob(-s*.20,-s*.04,s*.08,s*.10,OUT,0);
+  blob( s*.24,-s*.04,s*.08,s*.10,OUT,0);
+  g.restore();
+}
+/* ── 主人公：帽子・マント・体。輪郭は濃く ── */
+function drawHero(x,y,t){
+  const s=23, bob=Math.sin(t*5)*1.6;
+  g.save(); g.translate(x,y+bob);
+  g.beginPath(); g.ellipse(0,s*.95,s*.86,s*.3,0,0,7);
+  g.fillStyle='rgba(10,20,10,.36)'; g.fill();
+  g.beginPath(); g.ellipse(0,s*.95,s*1.12,s*.4,0,0,7);
+  g.strokeStyle='rgba(255,255,255,.85)'; g.lineWidth=s*.14; g.stroke();   /* 足元の白い輪 */
+  g.beginPath(); g.ellipse(0,0,s*1.5,s*1.5,0,0,7);
+  const gr=g.createRadialGradient(0,0,s*.4,0,0,s*1.5);
+  gr.addColorStop(0,'rgba(255,240,170,.30)'); gr.addColorStop(1,'rgba(255,240,170,0)');
+  g.fillStyle=gr; g.fill();                                               /* 主人公の光 */
+  g.beginPath(); g.moveTo(-s*.62,-s*.1); g.quadraticCurveTo(0,s*1.25,s*.62,-s*.1);
+  g.quadraticCurveTo(0,s*.34,-s*.62,-s*.1); g.closePath();
+  g.fillStyle=COL.heroCloak; g.fill(); g.strokeStyle=OUT; g.lineWidth=s*.15; g.stroke();
+  blob(0,0,s*.44,s*.5,COL.hero[0],s*.16);
+  blob(0,-s*.34,s*.36,s*.34,COL.heroSkin,s*.15);
+  g.beginPath(); g.moveTo(-s*.52,-s*.5); g.quadraticCurveTo(0,-s*1.12,s*.52,-s*.5);
+  g.quadraticCurveTo(0,-s*.36,-s*.52,-s*.5); g.closePath();
+  g.fillStyle=COL.hero[1]; g.fill(); g.strokeStyle=OUT; g.lineWidth=s*.15; g.stroke();
+  blob(-s*.13,-s*.3,s*.06,s*.08,OUT,0); blob(s*.13,-s*.3,s*.06,s*.08,OUT,0);
+  g.restore();
+}
+function frame(){
+  T+=1/60;
+  const cx=W/2, cy=H/2;
+  /* 地面：市松のタイルを二色で */
+  const TS=54, ox=(T*22)%TS, oy=(T*10)%TS;
+  for(let y=-TS;y<H+TS;y+=TS) for(let x=-TS;x<W+TS;x+=TS){
+    const i=((x/TS|0)+(y/TS|0))&1;
+    g.fillStyle=COL.ground[i]; g.fillRect(x-ox,y-oy,TS,TS); }
+  g.globalAlpha=.5;
+  for(let i=0;i<40;i++){ const x=(i*137%W), y=((i*211+T*10)%H);
+    g.fillStyle=COL.grass; g.fillRect(x,y,7,3); }
+  g.globalAlpha=1;
+  /* 拾える玉 */
+  orbs.forEach(o=>{ const x=cx+o.x, y=cy+o.y+Math.sin(T*3+o.ph)*3;
+    if(x<-20||x>W+20||y<-20||y>H+20) return;
+    g.beginPath(); g.arc(x,y,7,0,7); g.fillStyle=COL.orb; g.fill();
+    g.strokeStyle=OUT; g.lineWidth=2.4; g.stroke();
+    g.beginPath(); g.arc(x-2,y-2,2.6,0,7); g.fillStyle='#dffaff'; g.fill(); });
+  /* 群れ：主人公へ寄る */
+  foes.forEach(f=>{ f.r-=(28+f.k*4)/60; if(f.r<40){ f.r=520+R()*260; f.a=R()*6.28; }
+    const x=cx+Math.cos(f.a)*f.r, y=cy+Math.sin(f.a)*f.r*.62;
+    if(x<-40||x>W+40||y<-40||y>H+40) return;
+    drawFoe(x,y,f.s,f.k,T+f.ph,f.type); });
+  /* 弾：主人公から放射 */
+  if(T*60%6<1){ const a=T*3.4;
+    for(let i=0;i<3;i++) bullets.push({x:0,y:0,a:a+i*2.09,sp:5.2,life:1}); }
+  for(let i=bullets.length-1;i>=0;i--){ const b=bullets[i];
+    b.x+=Math.cos(b.a)*b.sp*3; b.y+=Math.sin(b.a)*b.sp*3*.62; b.life-=1/70;
+    if(b.life<=0){ bullets.splice(i,1); continue; }
+    const x=cx+b.x, y=cy+b.y;
+    g.beginPath(); g.ellipse(x,y,9,5,b.a,0,7);
+    g.fillStyle=COL.bullet; g.fill(); g.strokeStyle=OUT; g.lineWidth=2.6; g.stroke();
+    g.beginPath(); g.ellipse(x,y,4.4,2.2,b.a,0,7); g.fillStyle='#fff'; g.fill();
+    if(Math.hypot(b.x,b.y)>110 && R()<.022){
+      hits.push({x,y,t:0}); nums.push({x,y,t:0,v:(20+(R()*80|0))}); bullets.splice(i,1); } }
+  /* 被弾の光と数字 */
+  for(let i=hits.length-1;i>=0;i--){ const h=hits[i]; h.t+=1/60;
+    if(h.t>.22){ hits.splice(i,1); continue; }
+    const r=6+h.t*90; g.beginPath(); g.arc(h.x,h.y,r,0,7);
+    g.strokeStyle=`rgba(255,255,255,${1-h.t/.22})`; g.lineWidth=5*(1-h.t/.22)+1; g.stroke(); }
+  for(let i=nums.length-1;i>=0;i--){ const n=nums[i]; n.t+=1/60;
+    if(n.t>.8){ nums.splice(i,1); continue; }
+    const a=1-n.t/.8;
+    g.font='900 24px system-ui,sans-serif'; g.textAlign='center';
+    g.lineWidth=6; g.strokeStyle=`rgba(26,20,32,${a})`;
+    g.strokeText(n.v,n.x,n.y-n.t*36); g.fillStyle=`rgba(255,246,180,${a})`;
+    g.fillText(n.v,n.x,n.y-n.t*36); g.textAlign='start'; }
+  drawHero(cx,cy,T);
+  /* 主人公のまわりの攻撃範囲 */
+  g.beginPath(); g.arc(cx,cy,110+Math.sin(T*2)*4,0,7);
+  g.strokeStyle='rgba(255,243,160,.30)'; g.lineWidth=3; g.stroke();
+  /* ── UI ── */
+  g.save();
+  roundRect(14,14,W-28,16,8); g.fillStyle='rgba(20,16,26,.55)'; g.fill();
+  roundRect(16,16,(W-32)*xp,12,6); g.fillStyle=COL.xp; g.fill();
+  g.font='800 12px system-ui,sans-serif'; g.fillStyle='#fff';
+  g.fillText('Lv '+lvl, 20, 26);
+  roundRect(14,38,190,18,9); g.fillStyle='rgba(20,16,26,.55)'; g.fill();
+  roundRect(16,40,186*hp,14,7); g.fillStyle=COL.hp; g.fill();
+  g.font='800 20px system-ui,sans-serif'; g.textAlign='center';
+  g.lineWidth=5; g.strokeStyle=OUT;
+  const mm=String(9-Math.floor(T/60)%10).padStart(2,'0'), ss=String(59-Math.floor(T)%60).padStart(2,'0');
+  g.strokeText(mm+':'+ss,W/2,52); g.fillStyle='#fff'; g.fillText(mm+':'+ss,W/2,52);
+  g.textAlign='start';
+  /* 右下にスキルの丸 */
+  [['#ff7a4f','火'],['#63d8ff','氷'],['#b47aff','雷']].forEach(([c,t],i)=>{
+    const x=W-40-i*46, y=H-38;
+    g.beginPath(); g.arc(x,y,19,0,7); g.fillStyle=c; g.fill();
+    g.strokeStyle=OUT; g.lineWidth=3; g.stroke();
+    g.font='800 15px system-ui,sans-serif'; g.textAlign='center'; g.fillStyle='#fff';
+    g.fillText(t,x,y+5); g.textAlign='start'; });
+  g.restore();
+  requestAnimationFrame(frame);
+}
+document.getElementById('n').textContent=N;
+frame();
+</script>
