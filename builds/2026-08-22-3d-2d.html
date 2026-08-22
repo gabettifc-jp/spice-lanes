@@ -1,0 +1,259 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spice-lanes 見本5 ── 立体を、固定のカメラから</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0e1014;color:#e8e8e8;
+     font:14px/1.6 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+header{padding:16px 20px;border-bottom:1px solid #242830}
+h1{margin:0 0 4px;font-size:15px;letter-spacing:.04em}
+header p{margin:0;font-size:12px;color:#98a1b0}
+#hero{display:block;width:100%;max-width:900px;margin:14px auto 0;border:1px solid #242830;border-radius:4px;cursor:grab}
+#hero:active{cursor:grabbing}
+.hint{text-align:center;font-size:12px;color:#79828f;padding:8px 20px 4px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(268px,1fr));gap:12px;padding:14px 20px 24px}
+figure{margin:0;border:1px solid #242830;border-radius:4px;overflow:hidden;background:#0a0c10}
+figure canvas{display:block;width:100%;height:auto}
+figcaption{padding:8px 10px 10px;font-size:11.5px;border-top:1px solid #242830}
+.num{display:inline-block;min-width:1.7em;font-weight:700;color:#fff}
+.how{color:#79828f;font-size:10.5px;display:block;margin-top:2px;line-height:1.5}
+footer{padding:0 20px 26px;font-size:12px;color:#79828f;max-width:74ch}
+b{color:#e8e8e8}
+</style>
+
+<header>
+  <h1>spice-lanes 見本5 ── 立体を、固定のカメラから見る</h1>
+  <p>絵ではなく<b>形</b>を持たせた。頂点と面があり、光が当たり、奥から順に塗られている。カメラは固定の斜め見下ろし。</p>
+</header>
+
+<canvas id="hero"></canvas>
+<p class="hint">上の絵は<b>ドラッグで回る</b>。回るということは、描いた絵ではなく本当に立体だということ。</p>
+
+<div class="grid" id="grid"></div>
+
+<footer>
+  六枚とも<b>同じ形・同じカメラ</b>。違うのは<b>光の当て方と材質だけ</b>。<br>
+  外部の部品は使っていない（3Dの描画装置もこのファイルの中にある）。<br><br>
+  近いものが在れば番号で。<b>「4の材質で6の光」</b>のような混ぜ方でもいい。
+</footer>
+
+<script>
+/* ══════════ 小さな3D描画装置 ══════════════════════════════ */
+const V=(x,y,z)=>({x,y,z});
+function mesh(){ return {v:[],f:[]}; }
+function push(m,p){ m.v.push(p); return m.v.length-1; }
+function quad(m,a,b,c,d,col,tag){ m.f.push({i:[a,b,c,d],c:col,t:tag}); }
+function tri(m,a,b,c,col,tag){ m.f.push({i:[a,b,c],c:col,t:tag}); }
+
+/* ── 船を組む ─────────────────────────────────── */
+function buildShip(){
+  const m=mesh(), HULL=[92,74,52], DECK=[126,104,76], MAST=[74,54,34], SAIL=[238,232,214];
+  const ST=[-64,-48,-30,-10,10,30,46,60];          /* 船首尾方向の断面位置 */
+  const wid=z=>16*Math.sqrt(Math.max(0,1-(z/72)**2))+2.5;
+  const dep=z=>13*Math.sqrt(Math.max(0,1-(z/78)**2))+2;
+  const ring=[];
+  ST.forEach(z=>{
+    const w=wid(z), h=dep(z);
+    ring.push([ push(m,V(-w,0,z)), push(m,V(-w*0.78,-h*0.62,z)),
+                push(m,V(0,-h,z)),  push(m,V(w*0.78,-h*0.62,z)), push(m,V(w,0,z)) ]);
+  });
+  for(let i=0;i<ring.length-1;i++)
+    for(let k=0;k<4;k++)
+      quad(m,ring[i][k],ring[i][k+1],ring[i+1][k+1],ring[i+1][k],HULL,'hull');
+  /* 甲板 */
+  for(let i=0;i<ring.length-1;i++)
+    quad(m,ring[i][0],ring[i][4],ring[i+1][4],ring[i+1][0],DECK,'deck');
+  /* 船首と船尾を閉じる */
+  [0,ring.length-1].forEach((i,n)=>{
+    const r=ring[i], c=push(m,V(0,-2,ST[i]+(n?9:-9)));
+    for(let k=0;k<4;k++) n? tri(m,r[k],r[k+1],c,HULL,'hull') : tri(m,r[k+1],r[k],c,HULL,'hull');
+    tri(m,r[0],r[4],c,DECK,'deck');
+  });
+  /* 船首の突き出し */
+  const b0=push(m,V(-1.6,-1,60)),b1=push(m,V(1.6,-1,60)),b2=push(m,V(1.6,-9,84)),b3=push(m,V(-1.6,-9,84));
+  quad(m,b0,b1,b2,b3,MAST,'mast');
+  /* 帆柱と帆 */
+  [[-26,60,17,13],[6,84,22,16],[36,54,15,12]].forEach(([z,hgt,sw,sh])=>{
+    const r=2.2, seg=6, low=[],up=[];
+    for(let k=0;k<seg;k++){ const a=k/seg*Math.PI*2;
+      low.push(push(m,V(Math.cos(a)*r,0,z+Math.sin(a)*r)));
+      up .push(push(m,V(Math.cos(a)*r*.6,-hgt,z+Math.sin(a)*r*.6))); }
+    for(let k=0;k<seg;k++) quad(m,low[k],low[(k+1)%seg],up[(k+1)%seg],up[k],MAST,'mast');
+    /* 帆＝ふくらんだ面 */
+    const NX=5,NY=4, top=-hgt*0.92, bot=-hgt*0.30, grid=[];
+    for(let j=0;j<=NY;j++){ const row=[];
+      for(let k=0;k<=NX;k++){
+        const tx=k/NX*2-1, ty=j/NY;
+        const bulge = Math.cos(tx*Math.PI/2)*Math.sin((1-ty)*Math.PI*0.85)*sh*0.85;
+        row.push(push(m,V(tx*sw, top+(bot-top)*ty, z-2.5-bulge)));
+      } grid.push(row); }
+    for(let j=0;j<NY;j++) for(let k=0;k<NX;k++)
+      quad(m,grid[j][k],grid[j][k+1],grid[j+1][k+1],grid[j+1][k],SAIL,'sail');
+    /* 帆桁 */
+    const y0=push(m,V(-sw,top,z-1)),y1=push(m,V(sw,top,z-1)),
+          y2=push(m,V(sw,top-1.8,z-1)),y3=push(m,V(-sw,top-1.8,z-1));
+    quad(m,y0,y1,y2,y3,MAST,'mast');
+  });
+  /* 旗 */
+  const f0=push(m,V(0,-86,6)),f1=push(m,V(0,-79,6)),f2=push(m,V(0,-81,-16));
+  tri(m,f0,f1,f2,[176,58,44],'flag');
+  return m;
+}
+
+/* ── 島を組む ─────────────────────────────────── */
+function buildIsle(cx,cz,rad,hgt,seed){
+  const m=mesh(), SAND=[214,192,142], GRASS=[92,124,72], ROCK=[128,124,112];
+  const N=14, rings=[[1,0],[0.82,0.22],[0.58,0.55],[0.30,0.82],[0.10,1.0]];
+  const rnd=i=>0.72+0.5*Math.abs(Math.sin(i*12.9898+seed*78.233));
+  const idx=rings.map(([rf,hf])=>{
+    const row=[];
+    for(let k=0;k<N;k++){ const a=k/N*Math.PI*2, j=rnd(k+seed);
+      row.push(push(m,V(cx+Math.cos(a)*rad*rf*j, -hgt*hf, cz+Math.sin(a)*rad*rf*j))); }
+    return row;
+  });
+  for(let r=0;r<idx.length-1;r++) for(let k=0;k<N;k++){
+    const col = r===0?SAND : (r>=3?ROCK:GRASS);
+    quad(m,idx[r][k],idx[r][(k+1)%N],idx[r+1][(k+1)%N],idx[r+1][k],col,'land');
+  }
+  const top=push(m,V(cx,-hgt,cz));
+  for(let k=0;k<N;k++) tri(m,idx[4][k],idx[4][(k+1)%N],top,[150,146,134],'land');
+  return m;
+}
+
+/* ── 海を組む ─────────────────────────────────── */
+function buildSea(){
+  const m=mesh(), N=26, S=520, h=(x,z)=>Math.sin(x/46)*2.6+Math.cos(z/38)*2.2+Math.sin((x+z)/70)*1.6;
+  const g=[];
+  for(let j=0;j<=N;j++){ const row=[];
+    for(let k=0;k<=N;k++){ const x=-S/2+k*S/N, z=-S/2+j*S/N;
+      row.push(push(m,V(x,h(x,z)+7,z))); } g.push(row); }
+  for(let j=0;j<N;j++) for(let k=0;k<N;k++)
+    quad(m,g[j][k],g[j][k+1],g[j+1][k+1],g[j+1][k],[38,92,128],'sea');
+  return m;
+}
+
+function merge(list){ const M=mesh();
+  list.forEach(m=>{ const off=M.v.length; m.v.forEach(p=>M.v.push(p));
+    m.f.forEach(f=>M.f.push({i:f.i.map(i=>i+off),c:f.c,t:f.t})); }); return M; }
+
+const SCENE = merge([ buildSea(),
+  buildIsle(-150,-110,74,44,3), buildIsle(165,120,58,30,9), buildIsle(150,-170,40,22,17),
+  buildShip() ]);
+
+/* ══════════ 描く ══════════════════════════════════════════ */
+function render(cv, opt){
+  const {yaw=0.62, pitch=0.62, zoom=1, style} = opt;
+  const dpr = Math.min(2, devicePixelRatio||1);
+  const w = cv.clientWidth || 300, h = Math.round(w*0.62);
+  cv.width = w*dpr; cv.height = h*dpr;
+  const g = cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  style.sky(g,w,h);
+
+  const cy=Math.cos(yaw), sy=Math.sin(yaw), cp=Math.cos(pitch), sp=Math.sin(pitch);
+  const sc = (w/560)*1.55*zoom;
+  const P = SCENE.v.map(p=>{
+    const x =  p.x*cy + p.z*sy;
+    const z = -p.x*sy + p.z*cy;
+    const y =  p.y*cp - z*sp;
+    const d =  p.y*sp + z*cp;
+    return {sx:w/2 + x*sc, sy:h*0.60 + y*sc, d};
+  });
+  const L = (()=>{ const v={x:-0.55,y:-0.72,z:0.42};
+    const n=Math.hypot(v.x,v.y,v.z); return {x:v.x/n,y:v.y/n,z:v.z/n}; })();
+
+  const faces = SCENE.f.map(f=>{
+    const a=SCENE.v[f.i[0]], b=SCENE.v[f.i[1]], c=SCENE.v[f.i[2]];
+    const ux=b.x-a.x, uy=b.y-a.y, uz=b.z-a.z, vx=c.x-a.x, vy=c.y-a.y, vz=c.z-a.z;
+    let nx=uy*vz-uz*vy, ny=uz*vx-ux*vz, nz=ux*vy-uy*vx;
+    const nl=Math.hypot(nx,ny,nz)||1; nx/=nl; ny/=nl; nz/=nl;
+    let lam = -(nx*L.x+ny*L.y+nz*L.z);
+    const depth = f.i.reduce((s,i)=>s+P[i].d,0)/f.i.length;
+    const hy = f.i.reduce((s,i)=>s+SCENE.v[i].y,0)/f.i.length;
+    return {f, lam, depth, hy, n:{x:nx,y:ny,z:nz}};
+  }).sort((A,B)=>B.depth-A.depth);
+
+  faces.forEach(o=>{
+    const pts=o.f.i.map(i=>P[i]);
+    /* 裏面は描かない（海と帆は両面） */
+    const cr=(pts[1].sx-pts[0].sx)*(pts[2].sy-pts[0].sy)-(pts[1].sy-pts[0].sy)*(pts[2].sx-pts[0].sx);
+    if(cr>0 && o.f.t!=='sea' && o.f.t!=='sail' && o.f.t!=='flag') return;
+    g.beginPath(); g.moveTo(pts[0].sx,pts[0].sy);
+    for(let i=1;i<pts.length;i++) g.lineTo(pts[i].sx,pts[i].sy);
+    g.closePath();
+    style.face(g,o,w,h);
+  });
+  style.after && style.after(g,w,h);
+}
+
+/* ══════════ 六つの見え方 ══════════════════════════════════ */
+const cl=(v)=>Math.max(0,Math.min(255,Math.round(v)));
+const RGB=(c,k,add=0)=>`rgb(${cl(c[0]*k+add)},${cl(c[1]*k+add)},${cl(c[2]*k+add)})`;
+const grad=(g,w,h,a,b)=>{const G=g.createLinearGradient(0,0,0,h);G.addColorStop(0,a);G.addColorStop(1,b);
+  g.fillStyle=G;g.fillRect(0,0,w,h);};
+
+const STYLES=[
+{n:'素直な陰影', how:'光を一方向から当て、面ごとに明るさを変えるだけ。いちばん素の3D',
+ sky:(g,w,h)=>grad(g,w,h,'#8fb6cc','#dfe8ec'),
+ face:(g,o)=>{ const k=0.34+Math.max(0,o.lam)*0.86; g.fillStyle=RGB(o.f.c,k); g.fill(); }},
+
+{n:'トゥーン（段階＋輪郭）', how:'明るさを三段に量子化し、面の境に黒い線を引く。アニメの塗り',
+ sky:(g,w,h)=>grad(g,w,h,'#9ad3e8','#e8f4f8'),
+ face:(g,o)=>{ const l=Math.max(0,o.lam); const k = l>0.72?1.12 : l>0.34?0.82 : 0.56;
+   g.fillStyle=RGB(o.f.c,k); g.fill();
+   g.strokeStyle='rgba(24,28,34,.55)'; g.lineWidth=.5; g.stroke(); }},
+
+{n:'粘土（やわらかい光）', how:'環境光を強くして影を浅くし、彩度を落とす。マットな材質',
+ sky:(g,w,h)=>grad(g,w,h,'#efe6d8','#d8cec0'),
+ face:(g,o)=>{ const k=0.62+Math.max(0,o.lam)*0.5;
+   const m=(o.f.c[0]+o.f.c[1]+o.f.c[2])/3;
+   const c=[o.f.c[0]*.62+m*.38, o.f.c[1]*.62+m*.38, o.f.c[2]*.62+m*.38];
+   g.fillStyle=RGB(c,k,14); g.fill(); }},
+
+{n:'磨いた材質（強い反射）', how:'拡散に加えて鏡面反射を足す。上を向いた面が強く光る',
+ sky:(g,w,h)=>grad(g,w,h,'#1d2a38','#0a1018'),
+ face:(g,o)=>{ const l=Math.max(0,o.lam);
+   const spec=Math.pow(Math.max(0,-o.n.y),18)*180 + Math.pow(l,14)*150;
+   g.fillStyle=RGB(o.f.c,0.30+l*0.75,spec); g.fill(); }},
+
+{n:'水彩の3D', how:'明るさを粗い段に落として、紙のむらを上から重ねる。立体だが手描きに見える',
+ sky:(g,w,h)=>grad(g,w,h,'#f2ece0','#dfe6e2'),
+ face:(g,o)=>{ const l=Math.max(0,o.lam); const q=Math.round(l*4)/4;
+   g.fillStyle=RGB(o.f.c,0.55+q*0.62,18); g.globalAlpha=.92; g.fill(); g.globalAlpha=1; },
+ after:(g,w,h)=>{ const im=g.getImageData(0,0,g.canvas.width,g.canvas.height), d=im.data;
+   for(let i=0;i<d.length;i+=4){ const n=(Math.random()-0.5)*26;
+     d[i]+=n; d[i+1]+=n; d[i+2]+=n; } g.putImageData(im,0,0); }},
+
+{n:'夜（縁の光）', how:'正面からの光を落とし、輪郭に近い面だけを光らせる。海が発光する',
+ sky:(g,w,h)=>grad(g,w,h,'#050a12','#0b1a26'),
+ face:(g,o)=>{ const l=Math.max(0,o.lam);
+   const rim=Math.pow(1-Math.abs(o.n.z),3.2);
+   const base=RGB(o.f.c,0.16+l*0.26);
+   g.fillStyle=base; g.fill();
+   if(o.f.t==='sea'){ g.fillStyle=`rgba(64,224,208,${0.05+rim*0.10})`; g.fill(); }
+   else { g.fillStyle=`rgba(150,220,255,${rim*0.30})`; g.fill(); } }}
+];
+
+/* ── 大きいほう（回せる） ── */
+const hero=document.getElementById('hero');
+let yaw=0.62, pitch=0.60, drag=null, auto=true;
+function drawHero(){ render(hero,{yaw,pitch,zoom:1.05,style:STYLES[0]}); }
+hero.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,yaw,pitch};auto=false;hero.setPointerCapture(e.pointerId);});
+hero.addEventListener('pointermove',e=>{ if(!drag)return;
+  yaw=drag.yaw+(e.clientX-drag.x)*0.008;
+  pitch=Math.max(0.12,Math.min(1.35,drag.pitch+(e.clientY-drag.y)*0.006)); drawHero(); });
+addEventListener('pointerup',()=>drag=null);
+addEventListener('resize',()=>{drawHero();draw小()});
+function tick(){ if(auto){ yaw+=0.0016; drawHero(); } requestAnimationFrame(tick); }
+
+/* ── 小さいほう（六つ） ── */
+const grid=document.getElementById('grid'); const smalls=[];
+STYLES.forEach((s,i)=>{
+  const fig=document.createElement('figure');
+  fig.innerHTML=`<canvas></canvas><figcaption><span class="num">${i+1}</span>${s.n}
+    <span class="how">${s.how}</span></figcaption>`;
+  grid.appendChild(fig); smalls.push([fig.querySelector('canvas'),s]);
+});
+function draw小(){ smalls.forEach(([cv,s])=>render(cv,{yaw:0.62,pitch:0.62,zoom:1,style:s})); }
+
+drawHero(); draw小(); tick();
+</script>
