@@ -1,0 +1,371 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spice-lanes 見本3 ── 20の方向</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#111318;color:#e8e8e8;
+     font:14px/1.6 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+header{padding:16px 20px;border-bottom:1px solid #272b33}
+h1{margin:0 0 4px;font-size:15px;letter-spacing:.04em}
+header p{margin:0;font-size:12px;color:#98a1b0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(272px,1fr));gap:14px;padding:16px 20px 24px}
+figure{margin:0;border:1px solid #272b33;border-radius:4px;overflow:hidden;background:#0c0e12}
+figure svg{display:block;width:100%;height:auto}
+figcaption{padding:8px 11px 10px;font-size:12px;border-top:1px solid #272b33}
+.num{display:inline-block;min-width:1.7em;font-weight:700;color:#fff}
+.how{color:#79828f;font-size:10.5px;line-height:1.5;display:block;margin-top:2px}
+footer{padding:0 20px 26px;font-size:12px;color:#79828f;max-width:74ch}
+b{color:#e8e8e8}
+</style>
+
+<header>
+  <h1>spice-lanes 見本3 ── 20の方向</h1>
+  <p>視点・時代・画法・色調を散らした。盤面はどれも同じ（陸・島・街・航路・未踏）。<b>番号で返して。</b>「12の色で3の描き方」でもいい。</p>
+</header>
+<div class="grid" id="grid"></div>
+<footer>
+  20枚とも <b>HTML と SVG だけ</b>。画像素材はひとつも使っていない。<br>
+  前回の七枚は<b>質感しか変えていなかった</b>（どれも真上から見た地図）。今回は
+  <b>視点（真上・斜め・球・机の上）／時代／画法／色調</b>を全部散らしてある。<br><br>
+  近いものが一枚も無ければ「全部違う」で返して。そのときは、まだ軸が見つかっていない。
+</footer>
+
+<script>
+const W=340,H=210;
+const LAND='M 26 122 C 34 94, 62 76, 96 74 C 130 72, 150 86, 176 80 C 206 73, 226 88, 232 110 '+
+           'C 238 132, 220 152, 190 156 C 158 160, 132 150, 104 156 C 72 163, 40 150, 26 122 Z';
+const ISLE='M 250 60 C 262 52, 280 55, 286 66 C 292 78, 282 88, 268 87 C 254 86, 244 72, 250 60 Z';
+const CT=[{x:92,y:106,n:'ベルヌ'},{x:196,y:134,n:'サンティラ'},{x:268,y:72,n:'アズハル'}];
+const FOG='M 240 210 L 340 210 L 340 100 C 308 108, 294 148, 290 178 C 288 196, 270 206, 240 210 Z';
+
+const T=(u,f,o,s)=>`<filter id="${u}" x="-15%" y="-15%" width="140%" height="140%">
+  <feTurbulence type="fractalNoise" baseFrequency="${f}" numOctaves="${o}" seed="${s}"/>
+  <feColorMatrix type="saturate" values="0"/></filter>`;
+const WOB=(u,f,sc,sd)=>`<filter id="${u}">
+  <feTurbulence type="fractalNoise" baseFrequency="${f}" numOctaves="3" seed="${sd}" result="n"/>
+  <feDisplacementMap in="SourceGraphic" in2="n" scale="${sc}" xChannelSelector="R" yChannelSelector="G"/></filter>`;
+
+/* 標準の上物：街・航路・未踏 */
+function ov(o){
+  const {city='#333',lane='#8a3a2c',ink='#333',fog='#000',fogOp=.9,serif=false,dash='',glow=''}=o;
+  const A=CT[0],B=CT[1];
+  return `<line x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}" stroke="${lane}" stroke-width="3"
+    stroke-linecap="round" ${dash} ${glow} opacity=".92"/>
+  ${CT.map(c=>`<circle cx="${c.x}" cy="${c.y}" r="3.8" fill="${city}" ${glow}/>
+    <text x="${c.x+7}" y="${c.y-5}" font-size="9" fill="${ink}"
+      font-family="${serif?'Georgia,serif':'system-ui,sans-serif'}">${c.n}</text>`).join('')}
+  <path d="${FOG}" fill="${fog}" opacity="${fogOp}"/>`;
+}
+
+const S=[
+/* 1 */{n:'中世の写本', how:'金彩と装飾枠。遠近を捨てて象徴で描く。陸は記号、海は模様',
+ b:u=>`<defs>${T(u+'g',0.9,3,4)}<pattern id="${u}w" width="12" height="12" patternUnits="userSpaceOnUse">
+   <path d="M0 6 q3 -3 6 0 t6 0" stroke="#2b4a78" stroke-width=".9" fill="none"/></pattern></defs>
+ <rect width="${W}" height="${H}" fill="#f0e4c8"/><rect width="${W}" height="${H}" fill="url(#${u}w)" opacity=".55"/>
+ <rect x="8" y="8" width="${W-16}" height="${H-16}" fill="none" stroke="#9c1f21" stroke-width="3"/>
+ <rect x="14" y="14" width="${W-28}" height="${H-28}" fill="none" stroke="#c9a227" stroke-width="1.6"/>
+ <path d="${LAND}" fill="#cfa63c" stroke="#7a2418" stroke-width="1.6"/>
+ <path d="${ISLE}" fill="#cfa63c" stroke="#7a2418" stroke-width="1.4"/>
+ <rect width="${W}" height="${H}" filter="url(#${u}g)" opacity=".18" style="mix-blend-mode:multiply"/>
+ ${ov({city:'#7a2418',lane:'#9c1f21',ink:'#3d2a12',fog:'#dcc9a0',serif:1})}`},
+
+/* 2 */{n:'大航海時代の海図（ポルトラーノ）', how:'羅針図から放射状の線が全面に走る。金と朱、羊皮紙',
+ b:u=>`<defs>${T(u+'g',0.8,4,7)}${WOB(u+'w',0.04,4,3)}</defs>
+ <rect width="${W}" height="${H}" fill="#e6d3ab"/>
+ <g stroke="#9c5a2c" stroke-width=".4" opacity=".55">
+  ${Array.from({length:32},(_,i)=>{const a=i*Math.PI/16;
+   return `<line x1="180" y1="105" x2="${180+Math.cos(a)*300}" y2="${105+Math.sin(a)*300}"/>`}).join('')}
+ </g>
+ <g stroke="#7a2418" stroke-width=".35" opacity=".4">
+  ${Array.from({length:16},(_,i)=>{const a=i*Math.PI/8;
+   return `<line x1="60" y1="170" x2="${60+Math.cos(a)*280}" y2="${170+Math.sin(a)*280}"/>`}).join('')}
+ </g>
+ <g filter="url(#${u}w)"><path d="${LAND}" fill="#cbb489" stroke="#5c3a1c" stroke-width="1.4"/>
+ <path d="${ISLE}" fill="#cbb489" stroke="#5c3a1c" stroke-width="1.2"/></g>
+ <rect width="${W}" height="${H}" filter="url(#${u}g)" opacity=".2" style="mix-blend-mode:multiply"/>
+ ${ov({city:'#9c1f21',lane:'#7a2418',ink:'#4a3418',fog:'#d8c39a',serif:1,dash:'6 4'})}`},
+
+/* 3 */{n:'19世紀の水路図', how:'白地に淡青。等深線と水深の数字だらけ。線が細く、情報が密',
+ b:u=>`<defs>${WOB(u+'w',0.05,3,9)}</defs>
+ <rect width="${W}" height="${H}" fill="#f7f6f1"/>
+ ${[1,2,3,4].map(i=>`<path d="${LAND}" fill="none" stroke="#7fa8c4" stroke-width=".5" opacity="${.7-i*.12}"
+   transform="translate(${i*-5},${i*-4}) scale(${1+i*.045})" transform-origin="130 118"/>`).join('')}
+ <g filter="url(#${u}w)"><path d="${LAND}" fill="#efe9d6" stroke="#3a4a56" stroke-width="1"/>
+ <path d="${ISLE}" fill="#efe9d6" stroke="#3a4a56" stroke-width=".9"/></g>
+ <g font-size="6" fill="#5a7f99" font-family="Georgia,serif">
+  ${[[46,74,'42'],[150,60,'118'],[264,150,'96'],[92,182,'37'],[214,44,'205'],[300,124,'64'],[124,196,'28']]
+   .map(([x,y,t])=>`<text x="${x}" y="${y}">${t}</text>`).join('')}</g>
+ ${ov({city:'#1e2a33',lane:'#9c3a24',ink:'#1e2a33',fog:'#e4e2da',serif:1})}`},
+
+/* 4 */{n:'水墨・墨絵', how:'にじみと余白。輪郭を引かず、濃淡と筆致だけで陸を出す',
+ b:u=>`<defs><filter id="${u}b"><feGaussianBlur stdDeviation="4"/></filter>
+ <filter id="${u}e"><feTurbulence type="fractalNoise" baseFrequency="0.05" numOctaves="4" seed="6" result="n"/>
+ <feDisplacementMap in="SourceGraphic" in2="n" scale="12" xChannelSelector="R" yChannelSelector="G"/>
+ <feGaussianBlur stdDeviation="1.2"/></filter>${T(u+'g',0.7,3,2)}</defs>
+ <rect width="${W}" height="${H}" fill="#f6f3ea"/>
+ <g filter="url(#${u}e)">
+  <path d="${LAND}" fill="#2b2b2b" opacity=".14" transform="translate(-4,-3)"/>
+  <path d="${LAND}" fill="#1c1c1c" opacity=".30"/>
+  <path d="${ISLE}" fill="#1c1c1c" opacity=".28"/></g>
+ <g filter="url(#${u}b)" opacity=".5">
+  <path d="M 30 178 q 60 -12 120 0 t 130 -6" stroke="#3a3a3a" stroke-width="2" fill="none"/>
+  <path d="M 20 52 q 70 -10 140 2" stroke="#3a3a3a" stroke-width="1.4" fill="none" opacity=".6"/></g>
+ <rect width="${W}" height="${H}" filter="url(#${u}g)" opacity=".1" style="mix-blend-mode:multiply"/>
+ ${ov({city:'#7a1f14',lane:'#2b2b2b',ink:'#2b2b2b',fog:'#eae6da',fogOp:.85,serif:1})}`},
+
+/* 5 */{n:'浮世絵・絵巻', how:'平坦な色面と太い輪郭。波は型で描く。空はぼかしの帯',
+ b:u=>`<defs><linearGradient id="${u}s" x1="0" y1="0" x2="0" y2="1">
+   <stop offset="0" stop-color="#2f5f86"/><stop offset=".45" stop-color="#4d8ab0"/>
+   <stop offset="1" stop-color="#9fc4d6"/></linearGradient>
+ <pattern id="${u}w" width="26" height="14" patternUnits="userSpaceOnUse">
+   <path d="M0 12 q6.5 -10 13 0 t13 0" fill="none" stroke="#eaf2f6" stroke-width="1.3" opacity=".8"/></pattern></defs>
+ <rect width="${W}" height="${H}" fill="url(#${u}s)"/>
+ <rect width="${W}" height="${H}" fill="url(#${u}w)" opacity=".55"/>
+ <path d="${LAND}" fill="#d8c48a" stroke="#2e2a22" stroke-width="2.4"/>
+ <path d="${LAND}" fill="#8aa05c" stroke="none" transform="translate(0,-8) scale(.9)" transform-origin="130 118" opacity=".9"/>
+ <path d="${ISLE}" fill="#d8c48a" stroke="#2e2a22" stroke-width="2"/>
+ ${ov({city:'#b4322a',lane:'#2e2a22',ink:'#20303c',fog:'#20364a',serif:1})}`},
+
+/* 6 */{n:'油彩の風景', how:'筆跡が見える厚塗り。暖色に寄せて、光を一方向から当てる',
+ b:u=>`<defs><filter id="${u}p" x="-10%" y="-10%" width="130%" height="130%">
+   <feTurbulence type="fractalNoise" baseFrequency="0.03 0.12" numOctaves="4" seed="12" result="n"/>
+   <feDisplacementMap in="SourceGraphic" in2="n" scale="7" xChannelSelector="R" yChannelSelector="G"/></filter>
+ <radialGradient id="${u}l" cx=".3" cy=".2" r=".9">
+   <stop offset="0" stop-color="#c8a84e"/><stop offset=".5" stop-color="#7e7a35"/>
+   <stop offset="1" stop-color="#3d4426"/></radialGradient>
+ <linearGradient id="${u}q" x1="0" y1="0" x2="1" y2="1">
+   <stop offset="0" stop-color="#3f6f86"/><stop offset="1" stop-color="#1d3b52"/></linearGradient></defs>
+ <rect width="${W}" height="${H}" fill="url(#${u}q)"/>
+ <g filter="url(#${u}p)" opacity=".7">
+   ${Array.from({length:22},(_,i)=>`<line x1="${i*17}" y1="0" x2="${i*17-30}" y2="${H}"
+     stroke="${i%3?'#5b8ea6':'#2b5570'}" stroke-width="9" opacity=".35"/>`).join('')}</g>
+ <g filter="url(#${u}p)"><path d="${LAND}" fill="url(#${u}l)"/><path d="${ISLE}" fill="url(#${u}l)"/></g>
+ <path d="${LAND}" fill="none" stroke="#f0dfa0" stroke-width="1.6" opacity=".45" filter="url(#${u}p)"/>
+ ${ov({city:'#ffe9a8',lane:'#ffc46b',ink:'#f4ecd4',fog:'#101d28'})}`},
+
+/* 7 */{n:'ステンドグラス', how:'黒い鉛線で区切り、透過色を流し込む。線がすべての形を決める',
+ b:u=>`<defs><linearGradient id="${u}a" x1="0" y1="0" x2="1" y2="1">
+   <stop offset="0" stop-color="#1b6fa8"/><stop offset="1" stop-color="#0d3f66"/></linearGradient>
+ <linearGradient id="${u}b2" x1="0" y1="0" x2="0" y2="1">
+   <stop offset="0" stop-color="#d8a12c"/><stop offset="1" stop-color="#8f5a14"/></linearGradient>
+ <filter id="${u}gl" x="-40%" y="-40%" width="180%" height="180%">
+   <feGaussianBlur stdDeviation="2.5" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+ <rect width="${W}" height="${H}" fill="url(#${u}a)"/>
+ <g stroke="#0a0a0c" stroke-width="3" fill="none" opacity=".9">
+   ${Array.from({length:7},(_,i)=>`<line x1="${i*52}" y1="0" x2="${i*52-24}" y2="${H}"/>`).join('')}
+   ${Array.from({length:4},(_,i)=>`<line x1="0" y1="${i*56}" x2="${W}" y2="${i*56+14}"/>`).join('')}</g>
+ <path d="${LAND}" fill="url(#${u}b2)" stroke="#0a0a0c" stroke-width="4.5" stroke-linejoin="round"/>
+ <path d="${ISLE}" fill="url(#${u}b2)" stroke="#0a0a0c" stroke-width="4"/>
+ ${ov({city:'#ffe9a0',lane:'#e0483a',ink:'#ffeec0',fog:'#050a10',glow:`filter="url(#${u}gl)"`})}`},
+
+/* 8 */{n:'タペストリー・刺繍', how:'布目の織り、ステッチの粒。色数を絞って、輪郭を糸で作る',
+ b:u=>`<defs>${T(u+'g',1.4,2,5)}
+ <pattern id="${u}c" width="4" height="4" patternUnits="userSpaceOnUse">
+   <rect width="4" height="4" fill="#2c3f52"/><rect width="2" height="2" fill="#354b60"/>
+   <rect x="2" y="2" width="2" height="2" fill="#354b60"/></pattern>
+ <pattern id="${u}st" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+   <line x1="0" y1="0" x2="0" y2="4" stroke="#c8a05a" stroke-width="2.4" stroke-linecap="round"/></pattern></defs>
+ <rect width="${W}" height="${H}" fill="url(#${u}c)"/>
+ <path d="${LAND}" fill="url(#${u}st)" stroke="#e2c98e" stroke-width="2.2" stroke-dasharray="3 2"/>
+ <path d="${ISLE}" fill="url(#${u}st)" stroke="#e2c98e" stroke-width="2" stroke-dasharray="3 2"/>
+ <rect width="${W}" height="${H}" filter="url(#${u}g)" opacity=".22" style="mix-blend-mode:overlay"/>
+ ${ov({city:'#e8dcc0',lane:'#b8442f',ink:'#e8dcc0',fog:'#1a2836',dash:'4 3'})}`},
+
+/* 9 */{n:'木彫・寄木', how:'木目を流し、彫り込みの影を落とす。海と陸で木の色を変える',
+ b:u=>`<defs><filter id="${u}w" x="-10%" y="-10%" width="130%" height="130%">
+   <feTurbulence type="fractalNoise" baseFrequency="0.006 0.15" numOctaves="5" seed="8"/>
+   <feColorMatrix type="matrix" values="0 0 0 0 .42 0 0 0 0 .29 0 0 0 0 .15 0 0 0 .55 0"/></filter>
+ <filter id="${u}cv" x="-20%" y="-20%" width="150%" height="150%">
+   <feDropShadow dx="0" dy="2" stdDeviation="1.6" flood-color="#2a1a0c" flood-opacity=".8"/>
+   <feDropShadow dx="0" dy="-1" stdDeviation="0" flood-color="#e0bd85" flood-opacity=".5"/></filter></defs>
+ <rect width="${W}" height="${H}" fill="#6b4a26"/>
+ <rect width="${W}" height="${H}" filter="url(#${u}w)"/>
+ <g filter="url(#${u}cv)"><path d="${LAND}" fill="#c69a5c"/><path d="${ISLE}" fill="#c69a5c"/></g>
+ <g opacity=".5"><path d="${LAND}" fill="none" stroke="#3a2411" stroke-width="1.4"/></g>
+ ${ov({city:'#2f1c0b',lane:'#8f3f1c',ink:'#f2ddb8',fog:'#4a3118',serif:1})}`},
+
+/* 10 */{n:'モザイク', how:'すべてを小さなタイルに割る。目地の隙間が全体の質感になる',
+ b:u=>{const t=[];for(let y=0;y<H;y+=11)for(let x=0;x<W;x+=11){
+   const cx=x+5.5,cy=y+5.5;
+   t.push(`<rect x="${x+.7}" y="${y+.7}" width="9.6" height="9.6" rx="1"
+     data-cx="${cx}" data-cy="${cy}"/>`);}
+  return `<defs><clipPath id="${u}cl"><path d="${LAND}"/><path d="${ISLE}"/></clipPath></defs>
+  <rect width="${W}" height="${H}" fill="#0f2a3a"/>
+  <g fill="#1d5476">${t.join('')}</g>
+  <g clip-path="url(#${u}cl)" fill="#c8a860">${t.join('')}</g>
+  <g clip-path="url(#${u}cl)" fill="#a88a48" opacity=".5">${t.filter((_,i)=>i%3===0).join('')}</g>
+  <g fill="#2a6d93" opacity=".5">${t.filter((_,i)=>i%5===0).join('')}</g>
+  ${ov({city:'#e8c46a',lane:'#c0452f',ink:'#dfeef5',fog:'#04121c'})}`}},
+
+/* 11 */{n:'ブループリント（製図）', how:'青地に白い線だけ。寸法線と補助線が入る。塗りが無い',
+ b:u=>`<defs><pattern id="${u}g" width="17" height="17" patternUnits="userSpaceOnUse">
+   <path d="M17 0 L0 0 0 17" fill="none" stroke="#7fb6e0" stroke-width=".35" opacity=".45"/></pattern></defs>
+ <rect width="${W}" height="${H}" fill="#0e3b63"/>
+ <rect width="${W}" height="${H}" fill="url(#${u}g)"/>
+ <path d="${LAND}" fill="none" stroke="#dcefff" stroke-width="1.3"/>
+ <path d="${ISLE}" fill="none" stroke="#dcefff" stroke-width="1.1"/>
+ <g stroke="#8fc4e8" stroke-width=".5" opacity=".8">
+   <line x1="92" y1="106" x2="92" y2="196"/><line x1="196" y1="134" x2="196" y2="196"/>
+   <line x1="92" y1="192" x2="196" y2="192"/>
+   <path d="M92 192 l5 -3 v6 z M196 192 l-5 -3 v6 z" fill="#8fc4e8" stroke="none"/></g>
+ <text x="132" y="188" font-size="7.5" fill="#cfe6f8" font-family="ui-monospace,monospace">104</text>
+ ${ov({city:'#dcefff',lane:'#7fe0c0',ink:'#cfe6f8',fog:'#082a48',dash:'5 3'})}`},
+
+/* 12 */{n:'レトロ印刷（網点・版ズレ）', how:'二色を網点で刷り、わざと少しずらす。紙の白が透ける',
+ b:u=>`<defs><pattern id="${u}d" width="4" height="4" patternUnits="userSpaceOnUse">
+   <circle cx="2" cy="2" r="1.35" fill="#d94f3d"/></pattern>
+ <pattern id="${u}d2" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+   <circle cx="2" cy="2" r="1.25" fill="#2f6f9e"/></pattern>${T(u+'g',0.9,2,1)}</defs>
+ <rect width="${W}" height="${H}" fill="#f3efe4"/>
+ <rect width="${W}" height="${H}" fill="url(#${u}d2)" opacity=".55"/>
+ <path d="${LAND}" fill="url(#${u}d)" transform="translate(3,2)" opacity=".95"/>
+ <path d="${LAND}" fill="#f3efe4" opacity=".25"/>
+ <path d="${LAND}" fill="none" stroke="#22303a" stroke-width="1.1"/>
+ <path d="${ISLE}" fill="url(#${u}d)" transform="translate(3,2)"/>
+ <path d="${ISLE}" fill="none" stroke="#22303a" stroke-width="1"/>
+ <rect width="${W}" height="${H}" filter="url(#${u}g)" opacity=".16" style="mix-blend-mode:multiply"/>
+ ${ov({city:'#22303a',lane:'#d94f3d',ink:'#22303a',fog:'#dcd6c6'})}`},
+
+/* 13 */{n:'アイソメの箱庭', how:'斜め見下ろし。海に厚みがあり、陸が持ち上がって影を落とす',
+ b:u=>`<defs><filter id="${u}s" x="-30%" y="-30%" width="170%" height="170%">
+   <feDropShadow dx="0" dy="7" stdDeviation="5" flood-color="#04121c" flood-opacity=".55"/></filter>
+ <linearGradient id="${u}side" x1="0" y1="0" x2="0" y2="1">
+   <stop offset="0" stop-color="#2b6a8c"/><stop offset="1" stop-color="#123c52"/></linearGradient></defs>
+ <rect width="${W}" height="${H}" fill="#101c26"/>
+ <g transform="translate(170,118) scale(1,0.56) rotate(-45) translate(-130,-118)">
+   <rect x="-30" y="-30" width="330" height="320" fill="#164863"/>
+   <g filter="url(#${u}s)"><path d="${LAND}" fill="#5f8b4a"/><path d="${ISLE}" fill="#5f8b4a"/></g>
+   <path d="${LAND}" fill="none" stroke="#8fc470" stroke-width="1.4" opacity=".6"/>
+   <line x1="92" y1="106" x2="196" y2="134" stroke="#ffd27f" stroke-width="3" stroke-linecap="round"/>
+   ${CT.map(c=>`<circle cx="${c.x}" cy="${c.y}" r="4.5" fill="#ffd27f"/>`).join('')}
+   <path d="${FOG}" fill="#050b12" opacity=".95"/>
+ </g>
+ ${CT.map(c=>{const X=170+(c.x-130)*0.707-(c.y-118)*0.707, Y=118+((c.x-130)*0.707+(c.y-118)*0.707)*0.56;
+   return `<text x="${X+8}" y="${Y-6}" font-size="9" fill="#dfeaf2">${c.n}</text>`}).join('')}`},
+
+/* 14 */{n:'地球儀', how:'球に貼る。経緯線が曲がり、縁が暗く落ちる。回して見る画になる',
+ b:u=>`<defs><radialGradient id="${u}sp" cx=".35" cy=".3" r=".85">
+   <stop offset="0" stop-color="#3f8fb8"/><stop offset=".7" stop-color="#1a5478"/>
+   <stop offset="1" stop-color="#06202f"/></radialGradient>
+ <clipPath id="${u}c"><circle cx="170" cy="105" r="92"/></clipPath>
+ <radialGradient id="${u}v" cx=".5" cy=".5" r=".5">
+   <stop offset=".72" stop-color="#000" stop-opacity="0"/><stop offset="1" stop-color="#000" stop-opacity=".65"/></radialGradient></defs>
+ <rect width="${W}" height="${H}" fill="#0a0f16"/>
+ <circle cx="170" cy="105" r="92" fill="url(#${u}sp)"/>
+ <g clip-path="url(#${u}c)">
+   <g transform="translate(60,10) scale(.72)">
+     <path d="${LAND}" fill="#5d8a4e" opacity=".95"/><path d="${ISLE}" fill="#5d8a4e"/>
+     <line x1="92" y1="106" x2="196" y2="134" stroke="#ffd88a" stroke-width="3.4" stroke-linecap="round"/>
+     ${CT.map(c=>`<circle cx="${c.x}" cy="${c.y}" r="4.6" fill="#ffd88a"/>`).join('')}
+     <path d="${FOG}" fill="#03080e" opacity=".95"/></g>
+   <g stroke="#bfe0f0" stroke-width=".45" fill="none" opacity=".3">
+     ${[-60,-30,0,30,60].map(d=>`<ellipse cx="170" cy="105" rx="${92*Math.cos(d*Math.PI/180)}" ry="92"/>`).join('')}
+     ${[-52,-26,0,26,52].map(d=>`<line x1="78" y1="${105+d}" x2="262" y2="${105+d}"/>`).join('')}</g>
+   <circle cx="170" cy="105" r="92" fill="url(#${u}v)"/></g>
+ <circle cx="170" cy="105" r="92" fill="none" stroke="#8fb8cf" stroke-width="1" opacity=".5"/>`},
+
+/* 15 */{n:'机の上', how:'地図は道具のひとつ。コンパスと羊皮紙、ランタンの光が斜めに落ちる',
+ b:u=>`<defs>${T(u+'g',0.7,4,13)}
+ <radialGradient id="${u}l" cx=".28" cy=".18" r=".95">
+   <stop offset="0" stop-color="#fff3d0" stop-opacity=".55"/><stop offset="1" stop-color="#000" stop-opacity=".55"/></radialGradient>
+ <filter id="${u}s" x="-25%" y="-25%" width="160%" height="160%">
+   <feDropShadow dx="6" dy="9" stdDeviation="7" flood-color="#000" flood-opacity=".6"/></filter></defs>
+ <rect width="${W}" height="${H}" fill="#3a2415"/>
+ <rect width="${W}" height="${H}" filter="url(#${u}g)" opacity=".3" style="mix-blend-mode:overlay"/>
+ <g filter="url(#${u}s)" transform="rotate(-3 170 105)">
+   <rect x="26" y="18" width="266" height="172" rx="2" fill="#e2d2ab"/>
+   <g transform="translate(26,18) scale(.78)">
+     <path d="${LAND}" fill="#cbb489" stroke="#6b4a26" stroke-width="1.6"/>
+     <path d="${ISLE}" fill="#cbb489" stroke="#6b4a26" stroke-width="1.4"/>
+     <line x1="92" y1="106" x2="196" y2="134" stroke="#8f3a2c" stroke-width="3" stroke-dasharray="6 4"/>
+     ${CT.map(c=>`<circle cx="${c.x}" cy="${c.y}" r="4" fill="#7a2418"/>`).join('')}
+     <path d="${FOG}" fill="#d6c49c"/></g></g>
+ <g stroke="#c9b48a" stroke-width="2.4" fill="none" opacity=".95">
+   <path d="M262 176 L292 132 L300 178" stroke-linejoin="round"/>
+   <circle cx="292" cy="128" r="3.4" fill="#c9b48a"/></g>
+ <rect width="${W}" height="${H}" fill="url(#${u}l)"/>`},
+
+/* 16 */{n:'衛星写真', how:'雲と海の反射。陸は緑と褐色のむら。いちばん現実に寄せた見え方',
+ b:u=>`<defs>${T(u+'c',0.012,5,23)}
+ <filter id="${u}land" x="-10%" y="-10%" width="130%" height="130%">
+   <feTurbulence type="fractalNoise" baseFrequency="0.03" numOctaves="5" seed="31"/>
+   <feColorMatrix type="matrix" values="0 0 0 0 .28  0 0 0 0 .40  0 0 0 0 .18  0 0 0 .9 .1"/></filter>
+ <filter id="${u}sea" x="-10%" y="-10%" width="130%" height="130%">
+   <feTurbulence type="fractalNoise" baseFrequency="0.02 0.05" numOctaves="4" seed="19"/>
+   <feColorMatrix type="matrix" values="0 0 0 0 .06  0 0 0 0 .18  0 0 0 0 .30  0 0 0 .8 .15"/></filter>
+ <clipPath id="${u}cl"><path d="${LAND}"/><path d="${ISLE}"/></clipPath></defs>
+ <rect width="${W}" height="${H}" fill="#0a2438"/>
+ <rect width="${W}" height="${H}" filter="url(#${u}sea)" opacity=".9"/>
+ <g clip-path="url(#${u}cl)"><rect width="${W}" height="${H}" fill="#3c5a2a"/>
+   <rect width="${W}" height="${H}" filter="url(#${u}land)" opacity=".95"/></g>
+ <path d="${LAND}" fill="none" stroke="#d8e8c0" stroke-width=".8" opacity=".35"/>
+ <rect width="${W}" height="${H}" filter="url(#${u}c)" opacity=".22"/>
+ ${ov({city:'#ffe08a',lane:'#ff9a5c',ink:'#e8f2f8',fog:'#02080e'})}`},
+
+/* 17 */{n:'ネオン', how:'暗地に蛍光の線だけ。面を塗らず、光の残像で形を出す',
+ b:u=>`<defs><filter id="${u}n" x="-60%" y="-60%" width="220%" height="220%">
+   <feGaussianBlur stdDeviation="4" result="b1"/><feGaussianBlur in="SourceGraphic" stdDeviation="9" result="b2"/>
+   <feMerge><feMergeNode in="b2"/><feMergeNode in="b1"/><feMergeNode in="SourceGraphic"/></feMerge></filter>
+ <pattern id="${u}g" width="22" height="22" patternUnits="userSpaceOnUse">
+   <path d="M22 0 L0 0 0 22" fill="none" stroke="#1b3a4a" stroke-width=".6"/></pattern></defs>
+ <rect width="${W}" height="${H}" fill="#04070d"/>
+ <rect width="${W}" height="${H}" fill="url(#${u}g)" opacity=".7"/>
+ <g filter="url(#${u}n)">
+   <path d="${LAND}" fill="none" stroke="#2ce8c8" stroke-width="1.8"/>
+   <path d="${ISLE}" fill="none" stroke="#2ce8c8" stroke-width="1.6"/>
+   <line x1="92" y1="106" x2="196" y2="134" stroke="#ff4fa3" stroke-width="2.2" stroke-linecap="round"/>
+   ${CT.map(c=>`<circle cx="${c.x}" cy="${c.y}" r="3.4" fill="#fff3a0"/>`).join('')}</g>
+ ${CT.map(c=>`<text x="${c.x+8}" y="${c.y-6}" font-size="9" fill="#9fe8dc"
+   font-family="ui-monospace,monospace">${c.n}</text>`).join('')}
+ <path d="${FOG}" fill="#04070d" opacity=".95"/>`},
+
+/* 18 */{n:'ミニマル幾何', how:'円と直線と単色だけ。陸を多角形に丸め、余計なものを全部落とす',
+ b:u=>`<rect width="${W}" height="${H}" fill="#f0efe9"/>
+ <path d="M 30 124 L 96 74 L 178 80 L 232 110 L 190 156 L 104 156 Z" fill="#25303a"/>
+ <path d="M 250 60 L 286 66 L 268 88 Z" fill="#25303a"/>
+ <line x1="92" y1="106" x2="196" y2="134" stroke="#e05a3a" stroke-width="2.4"/>
+ ${CT.map(c=>`<circle cx="${c.x}" cy="${c.y}" r="5" fill="#f0efe9" stroke="#25303a" stroke-width="2"/>`).join('')}
+ ${CT.map(c=>`<text x="${c.x+9}" y="${c.y-6}" font-size="8.5" fill="#25303a"
+   letter-spacing=".08em">${c.n}</text>`).join('')}
+ <path d="${FOG}" fill="#c9c6bb"/>`},
+
+/* 19 */{n:'絵本の一頁', how:'太い輪郭、柔らかい色、手描きの文字。角が丸く、影が優しい',
+ b:u=>`<defs>${WOB(u+'w',0.03,3.5,15)}${T(u+'g',0.8,2,6)}
+ <filter id="${u}s"><feDropShadow dx="2" dy="3" stdDeviation="0" flood-color="#3b2f26" flood-opacity=".22"/></filter></defs>
+ <rect width="${W}" height="${H}" fill="#fdf6e6"/>
+ <rect x="6" y="6" width="${W-12}" height="${H-12}" rx="10" fill="#bfe0e4"/>
+ <g filter="url(#${u}w)">
+   <g filter="url(#${u}s)">
+     <path d="${LAND}" fill="#f0c987" stroke="#5b4636" stroke-width="3" stroke-linejoin="round"/>
+     <path d="${ISLE}" fill="#f0c987" stroke="#5b4636" stroke-width="2.6"/></g>
+   <path d="M 46 116 C 78 100, 120 106, 152 96" stroke="#9ec27a" stroke-width="9"
+     stroke-linecap="round" fill="none"/></g>
+ <rect width="${W}" height="${H}" filter="url(#${u}g)" opacity=".1" style="mix-blend-mode:multiply"/>
+ ${ov({city:'#e07a4f',lane:'#5b4636',ink:'#5b4636',fog:'#8fb3bc',dash:'7 5'})}`},
+
+/* 20 */{n:'劇画・コミック', how:'強いコントラスト、集中線、スクリーントーン。白と黒で決める',
+ b:u=>`<defs><pattern id="${u}t" width="4" height="4" patternUnits="userSpaceOnUse">
+   <circle cx="2" cy="2" r="1.1" fill="#161616"/></pattern>
+ <pattern id="${u}t2" width="3" height="3" patternUnits="userSpaceOnUse">
+   <circle cx="1.5" cy="1.5" r=".55" fill="#161616"/></pattern></defs>
+ <rect width="${W}" height="${H}" fill="#f6f5f1"/>
+ <g stroke="#161616" stroke-width=".7" opacity=".5">
+   ${Array.from({length:44},(_,i)=>{const a=i*Math.PI/22;
+     return `<line x1="${170+Math.cos(a)*95}" y1="${105+Math.sin(a)*68}"
+       x2="${170+Math.cos(a)*320}" y2="${105+Math.sin(a)*240}"/>`}).join('')}</g>
+ <rect width="${W}" height="${H}" fill="url(#${u}t2)" opacity=".5"/>
+ <path d="${LAND}" fill="url(#${u}t)" stroke="#161616" stroke-width="3" stroke-linejoin="round"/>
+ <path d="${LAND}" fill="#f6f5f1" opacity=".35"/>
+ <path d="${LAND}" fill="none" stroke="#161616" stroke-width="3"/>
+ <path d="${ISLE}" fill="url(#${u}t)" stroke="#161616" stroke-width="2.6"/>
+ ${ov({city:'#161616',lane:'#161616',ink:'#161616',fog:'#161616',fogOp:.92,dash:'8 4'})}`}
+];
+
+const grid=document.getElementById('grid');
+S.forEach((s,i)=>{
+  const u='v'+i;
+  grid.insertAdjacentHTML('beforeend',
+   `<figure><svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${s.b(u)}</svg>
+    <figcaption><span class="num">${i+1}</span>${s.n}<span class="how">${s.how}</span></figcaption></figure>`);
+});
+</script>
