@@ -1,0 +1,340 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spice-lanes 見本14 ── 上から見た地図に、横向きの船が滑る</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#171a21;color:#eef1f5;
+     font:14px/1.6 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+header{padding:16px 20px;border-bottom:1px solid #262b35}
+h1{margin:0 0 4px;font-size:15px;letter-spacing:.04em}
+header p{margin:0;font-size:12px;color:#9aa4b2}
+#hero{display:block;width:100%;max-width:960px;margin:14px auto 0;border-radius:16px;
+      border:1px solid #262b35;box-shadow:0 14px 46px rgba(0,0,0,.55)}
+.bar{display:flex;gap:8px;justify-content:center;padding:11px 20px 0;flex-wrap:wrap}
+button{font:inherit;font-size:12.5px;padding:7px 14px;border-radius:20px;border:1px solid #3b414d;
+       background:#1d212a;color:#e6e6e6;cursor:pointer}
+button.on{background:#f0a63c;border-color:#f0a63c;color:#1b1408;font-weight:700}
+.sprites{display:flex;gap:10px;justify-content:center;align-items:flex-end;padding:14px 20px 0;flex-wrap:wrap}
+.sprites figure{margin:0;text-align:center}
+.sprites canvas{display:block;background:#0f1218;border:1px solid #262b35;border-radius:8px}
+.sprites figcaption{font-size:10.5px;color:#79828f;margin-top:4px}
+footer{padding:14px 20px 26px;font-size:12px;color:#79828f;max-width:78ch}
+b{color:#eef1f5} code{background:#22262f;padding:1px 5px;border-radius:3px;font-size:11.5px}
+</style>
+
+<header>
+  <h1>spice-lanes 見本14 ── 上から見た地図に、横向きの船が滑る</h1>
+  <p>カメラは固定。地図は真上から、<b>立っているものは全部「横から見た絵」を貼る</b>。冷蔵庫の磁石の作り。</p>
+</header>
+
+<canvas id="hero"></canvas>
+<div class="bar" id="bar"></div>
+<div class="sprites" id="sp"></div>
+
+<footer>
+  <b>作り方。</b>3Dの船・木・家を<b>横から一度だけ描いて焼き付け</b>（下に並べたのがその素材）、
+  それを真上から見た地図の上に、<b>影つきで立てて置いている</b>。
+  だから<b>船は常に横向き</b>で、進む向きに合わせて左右に反転するだけ。<br><br>
+  <b>地図側。</b>島は「上の面」と「側面」を少しずらして描いて厚みを出す（板に貼ったシールの厚み）。
+  浅瀬・白い泡の縁・落ち影・波の筋・きらめき・未踏の霧。<b>霧の境目はぼかさない</b>（Riot の作りに合わせた）。
+</footer>
+
+<script>
+/* ══ 3D（横から一度だけ描いて焼き付けるために使う） ══════ */
+const V=(x,y,z)=>({x,y,z}), MM=()=>({v:[],f:[],ao:[]});
+function P(m,p,ao=0){ m.v.push(p); m.ao.push(ao); return m.v.length-1; }
+const Q=(m,a,b,c,d,col)=>m.f.push({i:[a,b,c,d],c:col});
+const Tr=(m,a,b,c,col)=>m.f.push({i:[a,b,c],c:col});
+function smooth(m){ const nv=m.v.map(()=>({x:0,y:0,z:0}));
+  m.f.forEach(f=>{ const a=m.v[f.i[0]],b=m.v[f.i[1]],c=m.v[f.i[2]];
+    const ux=b.x-a.x,uy=b.y-a.y,uz=b.z-a.z,vx=c.x-a.x,vy=c.y-a.y,vz=c.z-a.z;
+    let nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;
+    const L=Math.hypot(nx,ny,nz)||1; f.n={x:nx/L,y:ny/L,z:nz/L};
+    f.i.forEach(i=>{nv[i].x+=f.n.x;nv[i].y+=f.n.y;nv[i].z+=f.n.z;}); });
+  m.n=nv.map(n=>{const L=Math.hypot(n.x,n.y,n.z)||1;return{x:n.x/L,y:n.y/L,z:n.z/L};}); return m; }
+function cyl(m,cx,cy,cz,r0,r1,hgt,col,SEG=10,ao0=.35,ao1=0){ const a=[],b=[];
+  for(let k=0;k<SEG;k++){ const t=k/SEG*Math.PI*2;
+    a.push(P(m,V(cx+Math.cos(t)*r0,cy,cz+Math.sin(t)*r0),ao0));
+    b.push(P(m,V(cx+Math.cos(t)*r1,cy-hgt,cz+Math.sin(t)*r1),ao1)); }
+  for(let k=0;k<SEG;k++) Q(m,a[k],a[(k+1)%SEG],b[(k+1)%SEG],b[k],col);
+  const c=P(m,V(cx,cy-hgt,cz),ao1); for(let k=0;k<SEG;k++) Tr(m,b[k],b[(k+1)%SEG],c,col); }
+function ball(m,cx,cy,cz,r,sx,sy,sz,col,NU=12,NV=8,ao=.28){ const g=[];
+  for(let j=0;j<=NV;j++){ const ph=j/NV*Math.PI, row=[];
+    for(let k=0;k<=NU;k++){ const th=k/NU*Math.PI*2;
+      row.push(P(m,V(cx+Math.sin(ph)*Math.cos(th)*r*sx,cy-Math.cos(ph)*r*sy,
+                     cz+Math.sin(ph)*Math.sin(th)*r*sz),ao*(j/NV))); } g.push(row); }
+  for(let j=0;j<NV;j++) for(let k=0;k<NU;k++) Q(m,g[j][k],g[j][k+1],g[j+1][k+1],g[j+1][k],col); }
+function rbox(m,x0,y0,z0,x1,y1,z1,col,R,ao=.24){
+  const N=R>.02?4:1,W=(x1-x0)/2,D=(z1-z0)/2,cx=(x0+x1)/2,cz=(z0+z1)/2,r=Math.min(W,D)*R;
+  const corner=(sx,sz)=>{const o=[];for(let i=0;i<=N;i++){const a=i/N*Math.PI/2;
+    o.push([cx+sx*(W-r+Math.cos(a)*r),cz+sz*(D-r+Math.sin(a)*r)]);}return sx*sz>0?o:o.reverse();};
+  const pts=[...corner(1,1),...corner(-1,1),...corner(-1,-1),...corner(1,-1)],top=[],bot=[];
+  pts.forEach(([x,z])=>{top.push(P(m,V(x,y1,z),0));bot.push(P(m,V(x,y0,z),ao));});
+  for(let i=0;i<pts.length;i++) Q(m,bot[i],bot[(i+1)%pts.length],top[(i+1)%pts.length],top[i],col);
+  const ct=P(m,V(cx,y1,cz),0); for(let i=0;i<pts.length;i++) Tr(m,top[i],top[(i+1)%pts.length],ct,col); }
+
+const C={ hull:[204,98,60], hull2:[172,74,44], deck:[248,208,140], deck2:[228,178,110],
+  sail:[255,252,244], mast:[188,134,80], accent:[248,86,96], lamp:[255,214,120],
+  trunk:[152,106,62], leaf:[74,186,100], leaf2:[112,214,128], wall:[252,240,214], roof:[232,118,84] };
+
+/* 船（見本12で直した向き。真横から見る用） */
+function shipMesh(){
+  const m=MM(), LEN=44, N=18, RN=14;
+  const wid=z=>18*Math.pow(Math.max(0,1-Math.pow(Math.abs(z)/(LEN*1.1),2.6)),.34)+3.4;
+  const dep=12, sheer=z=>-Math.pow(Math.abs(z)/LEN,1.7)*14;
+  const prof=[]; for(let k=0;k<RN;k++){ const ang=Math.PI*(k/(RN-1));
+    prof.push([-Math.cos(ang),Math.sin(ang)]); }
+  const ring=[];
+  for(let s=0;s<=N;s++){ const z=-LEN+s*(2*LEN/N), w=wid(z), sh=sheer(z), r=[];
+    for(let k=0;k<RN;k++){ const [px,py]=prof[k];
+      r.push(P(m,V(px*w,sh+py*dep,z),.55*py)); } ring.push(r); }
+  for(let s=0;s<N;s++){ for(let k=0;k<RN-1;k++)
+      Q(m,ring[s][k],ring[s][k+1],ring[s+1][k+1],ring[s+1][k],(k+s)%7===0?C.hull2:C.hull);
+    Q(m,ring[s][0],ring[s][RN-1],ring[s+1][RN-1],ring[s+1][0],s%2?C.deck:C.deck2); }
+  [0,N].forEach((s,n)=>{ const z=-LEN+s*(2*LEN/N), r=ring[s];
+    const c=P(m,V(0,sheer(z)+dep*.45,z+(n?13:-7)),.42);
+    for(let k=0;k<RN-1;k++) n?Tr(m,r[k],r[k+1],c,C.hull):Tr(m,r[k+1],r[k],c,C.hull);
+    Tr(m,r[0],r[RN-1],c,C.deck); });
+  for(let s=0;s<N;s++) [0,RN-1].forEach(k=>{ const a=m.v[ring[s][k]],b=m.v[ring[s+1][k]];
+    Q(m,ring[s][k],ring[s+1][k],P(m,V(b.x*1.02,b.y-5.5,b.z),0),P(m,V(a.x*1.02,a.y-5.5,a.z),0),
+      s%2?C.deck:C.deck2); });
+  const cy0=sheer(-32);
+  rbox(m,-13,cy0,-40,13,cy0-18,-21,C.deck,.8);
+  rbox(m,-11,cy0-18,-38,11,cy0-27,-23,C.hull,.85);
+  cyl(m,0,cy0-27,-31,3,3,4,C.lamp,10,0,0);
+  const MZ=3, MH=94, base=sheer(3);
+  cyl(m,0,base,MZ,4.6,2.9,MH,C.mast,12,.42,0);
+  const sail=(top,bot,halfW,bul)=>{ const NX=14,NY=10,g=[];
+    for(let j=0;j<=NY;j++){ const row=[];
+      for(let k=0;k<=NX;k++){ const tx=k/NX*2-1,ty=j/NY;
+        const b=Math.cos(tx*Math.PI/2)*Math.sin((1-ty)*Math.PI*.92)*bul+Math.sin(tx*9)*.7*(1-ty);
+        row.push(P(m,V(tx*halfW,top+(bot-top)*ty+Math.cos(tx*Math.PI/2)*5*ty,MZ-4-b),.3*ty)); }
+      g.push(row); }
+    for(let j=0;j<NY;j++) for(let k=0;k<NX;k++)
+      Q(m,g[j][k],g[j][k+1],g[j+1][k+1],g[j+1][k],C.sail);
+    for(let k=0;k<8;k++){ const t0=k/8*2-1,t1=(k+1)/8*2-1;
+      const y0=top-2-Math.cos(t0*Math.PI/2)*4, y1=top-2-Math.cos(t1*Math.PI/2)*4;
+      Q(m,P(m,V(t0*(halfW+2),y0-1.6,MZ-5),0),P(m,V(t1*(halfW+2),y1-1.6,MZ-5),0),
+          P(m,V(t1*(halfW+2),y1+1.6,MZ-3),0),P(m,V(t0*(halfW+2),y0+1.6,MZ-3),0),C.mast); } };
+  sail(base-MH*.92,base-MH*.62,23,9); sail(base-MH*.58,base-MH*.14,31,14);
+  cyl(m,0,base-MH*.94,MZ,6.5,6.5,6,C.mast,12,.35,0);
+  const f=[[0,base-MH-16,MZ],[0,base-MH-4,MZ],[0,base-MH-9,MZ-34]].map(q=>P(m,V(q[0],q[1],q[2]),0));
+  Tr(m,f[0],f[1],f[2],C.accent);
+  return smooth(m);
+}
+function treeMesh(){ const m=MM();
+  cyl(m,0,0,0,3.2,2.2,20,C.trunk,10,.45,0);
+  ball(m,0,-23,0,13,1,.86,1,C.leaf,14,10);
+  ball(m,5,-17,-4,8.4,1,.8,1,C.leaf2,12,8);
+  return smooth(m); }
+function hutMesh(){ const m=MM();
+  rbox(m,-10,0,-10,10,-15,10,C.wall,.45,.35);
+  cyl(m,0,-15,0,15,.6,13,C.roof,4,0,0);
+  return smooth(m); }
+
+/* ── 横から一度だけ描いて焼き付ける ── */
+const cl=v=>v<0?0:v>255?255:v|0;
+const LGT={x:-.44,y:-.82,z:.36}; (()=>{const n=Math.hypot(LGT.x,LGT.y,LGT.z);
+  LGT.x/=n;LGT.y/=n;LGT.z/=n;})();
+function bake(m,W,H,scale,cxOff,cyOff,outline){
+  const cv=document.createElement('canvas'), dpr=2;
+  cv.width=W*dpr; cv.height=H*dpr; cv.style.width=W+'px'; cv.style.height=H+'px';
+  const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  const pr=m.v.map(p=>({sx:W/2+p.x*scale+cxOff, sy:H+cyOff+p.y*scale, d:p.z}));
+  const vi=m.n.map(n=>Math.max(0,-(n.x*LGT.x+n.y*LGT.y+n.z*LGT.z)));
+  const list=m.f.map(f=>({f,d:f.i.reduce((s,i)=>s+pr[i].d,0)/f.i.length})).sort((a,b)=>a.d-b.d);
+  g.save(); g.beginPath();
+  list.forEach(({f})=>{ const p=f.i.map(i=>pr[i]);
+    g.moveTo(p[0].sx,p[0].sy); for(let i=1;i<p.length;i++) g.lineTo(p[i].sx,p[i].sy); g.closePath(); });
+  g.strokeStyle=outline; g.lineWidth=4.6; g.lineJoin='round'; g.stroke(); g.restore();
+  for(const {f} of list){
+    const p=f.i.map(i=>pr[i]);
+    let lo=0,hi=0; f.i.forEach((idx,n)=>{ if(vi[idx]<vi[f.i[lo]])lo=n; if(vi[idx]>vi[f.i[hi]])hi=n; });
+    const ao=i=>1-(m.ao[i]||0)*.5;
+    const kA=(.68+vi[f.i[lo]]*.5)*ao(f.i[lo]), kB=(.68+vi[f.i[hi]]*.5)*ao(f.i[hi]);
+    const spec=Math.pow(Math.max(0,-f.n.y),2.2)*30;
+    const col=k=>`rgb(${cl(f.c[0]*k+16+spec)},${cl(f.c[1]*k+16+spec)},${cl(f.c[2]*k+16+spec)})`;
+    g.beginPath(); g.moveTo(p[0].sx,p[0].sy);
+    for(let i=1;i<p.length;i++) g.lineTo(p[i].sx,p[i].sy); g.closePath();
+    if(Math.abs(kA-kB)<.02) g.fillStyle=col((kA+kB)/2);
+    else { const gr=g.createLinearGradient(p[lo].sx,p[lo].sy,p[hi].sx,p[hi].sy);
+      gr.addColorStop(0,col(kA)); gr.addColorStop(1,col(kB)); g.fillStyle=gr; }
+    g.strokeStyle=col((kA+kB)/2); g.lineWidth=.7; g.fill(); g.stroke(); }
+  return cv;
+}
+const dk=c=>`rgb(${cl(c[0]*.42)},${cl(c[1]*.42)},${cl(c[2]*.42)})`;
+const SP_SHIP=bake(shipMesh(),210,190,1.02,0,-12,dk(C.hull));
+const SP_TREE=bake(treeMesh(),70,74,1.05,0,-4,dk(C.leaf));
+const SP_HUT =bake(hutMesh(), 76,66,1.05,0,-4,dk(C.roof));
+const sp=document.getElementById('sp');
+[[SP_SHIP,'船（焼き付けた素材）'],[SP_TREE,'木'],[SP_HUT,'家']].forEach(([cv,n])=>{
+  const f=document.createElement('figure'); f.appendChild(cv);
+  const c=document.createElement('figcaption'); c.textContent=n; f.appendChild(c); sp.appendChild(f); });
+
+/* ══ 地図（真上から・カメラ固定） ══════════════════ */
+const ISLES=[
+ {x:-250,z:-170,r:96,seed:3, name:'ベルヌ', good:'羊毛',
+  props:[[-.32,-.18,'t',1],[.22,.2,'t',.8],[.05,-.5,'h',1],[.44,-.28,'t',.7],[-.5,.28,'t',.9]]},
+ {x: 250,z: 140,r:74,seed:9, name:'サンティラ', good:'丁子',
+  props:[[0,0,'t',1.1],[-.4,.3,'h',.85],[.36,-.3,'t',.8]]},
+ {x: 190,z:-260,r:54,seed:17, name:'アズハル', good:'龍涎香',
+  props:[[0,-.1,'t',.9],[-.3,.3,'t',.7]]},
+ {x:-330,z: 250,r:62,seed:23, name:'モルガ', good:'黒檀',
+  props:[[.1,.1,'t',1],[-.35,-.2,'h',.75]]}
+];
+const LANE=[0,1];
+const PATH=[[-250,-170],[-40,-40],[250,140]];      /* 船が滑る道 */
+function isleShape(is,k){ const a=k*Math.PI*2;
+  const j=.88+.16*Math.sin(k*30*.4+is.seed)+.09*Math.sin(k*30+is.seed*2);
+  return [is.x+Math.cos(a)*is.r*j, is.z+Math.sin(a)*is.r*j]; }
+
+let T=0, showFog=true, moving=true;
+function render(cv){
+  const dpr=Math.min(2,devicePixelRatio||1), w=cv.clientWidth||300, h=Math.round(w*.60);
+  cv.width=w*dpr; cv.height=h*dpr;
+  const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  const S=w/900;                                   /* 世界→画面。カメラは固定 */
+  const px=x=>w/2+x*S, py=z=>h/2+z*S;
+
+  /* 海 */
+  const G=g.createLinearGradient(0,0,0,h);
+  G.addColorStop(0,'#3fc6dc'); G.addColorStop(1,'#1f9ec4');
+  g.fillStyle=G; g.fillRect(0,0,w,h);
+  g.save(); g.globalAlpha=.30; g.strokeStyle='#bff0f8'; g.lineCap='round';
+  for(let i=0;i<26;i++){ const yy=(i*37+T*11)%(h+60)-30, len=w*(.05+((i*13)%9)/40);
+    const xx=((i*211)%w);
+    g.beginPath(); g.moveTo(xx,yy); g.quadraticCurveTo(xx+len/2,yy-4,xx+len,yy);
+    g.lineWidth=Math.max(1.4,2.6*S*2); g.stroke(); }
+  g.restore();
+  /* 雲の影 */
+  g.save(); g.globalAlpha=.09; g.fillStyle='#04243a';
+  [[-300,-120,180],[160,80,220],[-60,300,150]].forEach(([x,z,r],i)=>{
+    g.beginPath(); g.ellipse(px(x+((T*14+i*300)%1300)-650),py(z),r*S,r*S*.7,0,0,7);
+    g.filter='blur(12px)'; g.fill(); });
+  g.restore();
+
+  /* 航路：地図の上の点線＋光 */
+  const A=ISLES[LANE[0]], B=ISLES[LANE[1]];
+  g.save(); g.setLineDash([10*S*2,9*S*2]); g.lineDashOffset=-T*26*S*2;
+  g.beginPath(); g.moveTo(px(A.x),py(A.z)); g.lineTo(px(B.x),py(B.z));
+  g.strokeStyle='rgba(255,214,120,.95)'; g.lineWidth=Math.max(2.4,5.2*S*2); g.lineCap='round'; g.stroke();
+  g.restore();
+
+  /* 島：上の面と側面をずらして厚みを出す */
+  const OX=6*S*2, OY=9*S*2;
+  ISLES.forEach(is=>{
+    const pts=[]; for(let k=0;k<48;k++) pts.push(isleShape(is,k/48));
+    const path=(dx,dy)=>{ g.beginPath();
+      pts.forEach(([x,z],i)=>{ const X=px(x)+dx, Y=py(z)+dy; i?g.lineTo(X,Y):g.moveTo(X,Y); });
+      g.closePath(); };
+    g.save(); path(OX*1.4,OY*1.4); g.fillStyle='rgba(4,40,60,.28)'; g.filter='blur(9px)'; g.fill(); g.restore();
+    path(0,0); g.strokeStyle='rgba(255,255,255,.85)'; g.lineWidth=Math.max(2,5*S*2);
+    g.stroke();                                            /* 白い泡の縁 */
+    path(0,0); g.fillStyle='#7fd8e4'; g.fill();            /* 浅瀬 */
+    const sh=(dx,dy)=>{ g.beginPath();
+      pts.forEach(([x,z],i)=>{ const X=px(is.x+(x-is.x)*.84)+dx, Y=py(is.z+(z-is.z)*.84)+dy;
+        i?g.lineTo(X,Y):g.moveTo(X,Y); }); g.closePath(); };
+    sh(OX,OY); g.fillStyle='#b98f4e'; g.fill();            /* 側面（厚み） */
+    sh(0,0);   g.fillStyle='#f6dfa4'; g.fill();            /* 砂 */
+    const gr=(dx,dy)=>{ g.beginPath();
+      pts.forEach(([x,z],i)=>{ const X=px(is.x+(x-is.x)*.66)+dx, Y=py(is.z+(z-is.z)*.66)+dy;
+        i?g.lineTo(X,Y):g.moveTo(X,Y); }); g.closePath(); };
+    gr(OX*.7,OY*.7); g.fillStyle='#4f8f52'; g.fill();
+    gr(0,0); const gg=g.createLinearGradient(px(is.x)-is.r*S,py(is.z)-is.r*S,px(is.x)+is.r*S,py(is.z)+is.r*S);
+    gg.addColorStop(0,'#96e08c'); gg.addColorStop(1,'#63b866'); g.fillStyle=gg; g.fill();
+  });
+
+  /* 立っているもの＝横から見た絵を、影つきで貼る */
+  const stand=(img,X,Y,scale,flip)=>{
+    g.save(); g.beginPath();
+    g.ellipse(X,Y,img.width/2*.34*scale/2,img.width/2*.12*scale/2,0,0,7);
+    g.fillStyle='rgba(4,40,60,.34)'; g.filter='blur(4px)'; g.fill(); g.restore();
+    const W=img.width/2*scale, H=img.height/2*scale;
+    g.save(); g.translate(X,Y); if(flip) g.scale(-1,1);
+    g.drawImage(img,-W/2,-H,W,H); g.restore(); };
+  const items=[];
+  ISLES.forEach(is=>is.props.forEach(([ax,az,kind,s])=>{
+    items.push({z:is.z+az*is.r, X:px(is.x+ax*is.r), Y:py(is.z+az*is.r),
+                img:kind==='t'?SP_TREE:SP_HUT, s:(kind==='t'?.62:.58)*s*S*2, flip:false}); }));
+  /* 船が道を滑る */
+  const u=(T*.055)%2, seg=u<1?0:1, uu=u<1?u:u-1;
+  const a=PATH[seg], b=PATH[seg+1];
+  const ease=t=>t*t*(3-2*t), e=ease(uu);
+  const sx=a[0]+(b[0]-a[0])*e, sz=a[1]+(b[1]-a[1])*e;
+  const bob=Math.sin(T*2.4)*3, tilt=Math.sin(T*1.6)*.03;
+  items.push({z:sz, X:px(sx), Y:py(sz)+bob, img:SP_SHIP, s:.92*S*2, flip:(b[0]-a[0])<0, tilt});
+  items.sort((p,q)=>p.z-q.z).forEach(it=>{
+    if(it.tilt!==undefined){ g.save(); g.translate(it.X,it.Y); g.rotate(it.tilt);
+      g.translate(-it.X,-it.Y); }
+    stand(it.img,it.X,it.Y,it.s,it.flip);
+    if(it.tilt!==undefined) g.restore(); });
+  /* 航跡 */
+  g.save(); g.globalAlpha=.4; g.strokeStyle='#fff'; g.lineWidth=Math.max(2,7*S*2); g.lineCap='round';
+  g.beginPath(); g.moveTo(px(sx)-Math.sign(b[0]-a[0])*10*S*2,py(sz)+4*S*2);
+  g.lineTo(px(sx)-Math.sign(b[0]-a[0])*70*S*2,py(sz)+7*S*2); g.stroke(); g.restore();
+
+  /* 街の名札 */
+  ISLES.forEach(is=>{ const X=px(is.x), Y=py(is.z)-is.r*S*.55;
+    const txt=is.name, sub=is.good;
+    g.font=`700 ${13*S*2}px system-ui,sans-serif`; const tw=g.measureText(txt).width;
+    const ww=tw+30*S*2, hh=26*S*2, x=X-ww/2, y=Y-hh/2;
+    g.save(); g.shadowColor='rgba(4,24,40,.4)'; g.shadowBlur=8; g.shadowOffsetY=3;
+    g.beginPath(); g.moveTo(x+hh/2,y); g.arcTo(x+ww,y,x+ww,y+hh,hh/2);
+    g.arcTo(x+ww,y+hh,x,y+hh,hh/2); g.arcTo(x,y+hh,x,y,hh/2); g.arcTo(x,y,x+ww,y,hh/2);
+    g.closePath(); g.fillStyle='rgba(255,252,242,.95)'; g.fill(); g.restore();
+    g.fillStyle='#3a2a1c'; g.textAlign='center'; g.textBaseline='middle';
+    g.fillText(txt,X,y+hh*.42);
+    g.font=`600 ${9.5*S*2}px system-ui,sans-serif`; g.fillStyle='rgba(58,42,28,.6)';
+    g.fillText(sub,X,y+hh*.78); g.textAlign='start'; });
+
+  /* 未踏の霧：境目はぼかさない */
+  if(showFog){ g.save();
+    g.beginPath(); g.rect(0,0,w,h);
+    ISLES.forEach(is=>{ g.moveTo(px(is.x)+is.r*2.1*S,py(is.z));
+      g.arc(px(is.x),py(is.z),is.r*2.1*S,0,7,true); });
+    g.moveTo(px(sx)+150*S,py(sz)); g.arc(px(sx),py(sz),150*S,0,7,true);
+    g.fillStyle='rgba(214,238,246,.94)'; g.fill('evenodd');
+    g.restore(); }
+
+  /* きらめき */
+  for(let i=0;i<22;i++){ const X=((i*167)%w), Y=((i*233)%h);
+    const s=(1.6+((i*7)%3))*(0.55+.5*Math.abs(Math.sin(T*2+i)))*Math.max(1,S*2);
+    g.save(); g.globalAlpha=.30+((i%3)*.14); g.fillStyle='#fff'; g.beginPath();
+    g.moveTo(X,Y-s); g.quadraticCurveTo(X,Y,X+s,Y); g.quadraticCurveTo(X,Y,X,Y+s);
+    g.quadraticCurveTo(X,Y,X-s,Y); g.quadraticCurveTo(X,Y,X,Y-s); g.fill(); g.restore(); }
+
+  drawUI(g,w,h,S);
+}
+function drawUI(g,w,h,S){
+  const R=(x,y,ww,hh,r)=>{ g.beginPath(); g.moveTo(x+r,y);
+    g.arcTo(x+ww,y,x+ww,y+hh,r); g.arcTo(x+ww,y+hh,x,y+hh,r);
+    g.arcTo(x,y+hh,x,y,r); g.arcTo(x,y,x+ww,y,r); g.closePath(); };
+  const U=w/960, pill=(x,y,ww,hh,fill,txt,sub)=>{ g.save();
+    g.shadowColor='rgba(4,18,34,.45)'; g.shadowBlur=10; g.shadowOffsetY=4;
+    R(x,y,ww,hh,hh/2); g.fillStyle=fill; g.fill(); g.restore();
+    R(x,y,ww,hh,hh/2); g.strokeStyle='rgba(255,255,255,.8)'; g.lineWidth=2; g.stroke();
+    g.fillStyle='#3a2a1c'; g.textBaseline='middle'; g.font=`700 ${hh*.44}px system-ui,sans-serif`;
+    g.fillText(txt,x+hh*.86,y+hh*.55); g.fillStyle='rgba(58,42,28,.62)';
+    g.font=`600 ${hh*.29}px system-ui,sans-serif`; g.fillText(sub,x+hh*.86,y+hh*.2); };
+  pill(16*U,16*U,156*U,44*U,'#fff6dc','1,240','所持');
+  pill(w-186*U,16*U,170*U,44*U,'#ffe0e0','4,000','取り立てまで 7');
+  const pop=1+.04*Math.sin(T*2.6);
+  const bt=(cx,cy,r,fill,label)=>{ g.save(); g.shadowColor='rgba(4,18,34,.5)';
+    g.shadowBlur=12; g.shadowOffsetY=6; g.beginPath(); g.arc(cx,cy,r,0,7);
+    g.fillStyle=fill; g.fill(); g.restore(); g.fillStyle='#fff';
+    g.font=`700 ${r*.48}px system-ui,sans-serif`; g.textAlign='center'; g.textBaseline='middle';
+    g.fillText(label,cx,cy); g.textAlign='start'; };
+  const by=h-42*U, br=30*U;
+  bt(w/2-88*U,by,br,'#4fb8f0','繋ぐ'); bt(w/2,by+4*U,br*1.15*pop,'#f0a63c','出す');
+  bt(w/2+88*U,by,br,'#8f8f9c','待つ');
+}
+
+const bar=document.getElementById('bar');
+[['霧を出す／消す',()=>showFog=!showFog],['船を止める／動かす',()=>moving=!moving]]
+ .forEach(([label,f])=>{ const b=document.createElement('button'); b.textContent=label;
+  b.onclick=()=>{ f(); }; bar.appendChild(b); });
+
+const hero=document.getElementById('hero');
+addEventListener('resize',()=>render(hero));
+(function frame(){ if(moving) T+=1/60; render(hero); requestAnimationFrame(frame); })();
+</script>
