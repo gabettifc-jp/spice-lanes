@@ -1,0 +1,233 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spice-lanes 見本1 ── 画づら</title>
+<style>
+:root{
+  /* ── つまみ：甲「海図」 ─────────────────────── */
+  --ko-bg:        #e8dcc0;   /* 紙 */
+  --ko-sea:       #dfd2b4;   /* 既踏の海 */
+  --ko-unknown:   #cdbf9e;   /* 未踏（紙のまま・方眼だけ） */
+  --ko-land:      #d3c095;
+  --ko-line:      #6b5b3e;
+  --ko-city:      #3f3524;
+  --ko-lane:      #8b3a2f;
+  --ko-ink:       #3f3524;
+  --ko-route:     #4a6b8a;
+
+  /* ── つまみ：乙「夜の海」 ───────────────────── */
+  --otsu-bg:      #060b12;
+  --otsu-sea:     #0e2338;
+  --otsu-unknown: #000000;   /* 未踏＝0 */
+  --otsu-land:    #17402f;
+  --otsu-line:    #2f6f55;
+  --otsu-city:    #ffd27f;
+  --otsu-lane:    #7fd4ff;
+  --otsu-ink:     #cfe6f5;
+  --otsu-route:   #ffffff;
+}
+*{box-sizing:border-box}
+body{margin:0;font:14px/1.6 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;background:#15171c;color:#e6e6e6}
+header{padding:14px 18px;border-bottom:1px solid #2a2e37}
+h1{margin:0 0 4px;font-size:15px;letter-spacing:.04em}
+header p{margin:0;font-size:12px;color:#9aa3b2}
+.wrap{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:#2a2e37}
+@media(max-width:820px){.wrap{grid-template-columns:1fr}}
+.pane{background:#0b0d11;position:relative}
+.pane.dim{opacity:.30;filter:saturate(.4)}
+.tag{position:absolute;top:10px;left:12px;z-index:3;font-size:12px;letter-spacing:.14em;
+     padding:3px 9px;border-radius:2px;background:rgba(0,0,0,.55);color:#fff}
+.pane[data-side="ko"] .tag{background:rgba(63,53,36,.85)}
+svg{display:block;width:100%;height:auto}
+.bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;padding:12px 18px;border-top:1px solid #2a2e37}
+button{font:inherit;padding:7px 13px;border-radius:3px;border:1px solid #3b414d;background:#1d212a;color:#e6e6e6;cursor:pointer}
+button:hover{background:#262b36}
+button.on{background:#e6e6e6;color:#15171c;border-color:#e6e6e6}
+button.bad{border-color:#6b3a3a}
+.out{margin:0 18px 18px;padding:12px 14px;border:1px solid #2a2e37;border-radius:3px;
+     background:#0f1218;white-space:pre-wrap;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:#b9c4d4;display:none}
+.note{padding:0 18px 16px;font-size:12px;color:#79828f}
+kbd{background:#252a33;border:1px solid #3b414d;border-radius:3px;padding:1px 5px;font-size:11px}
+</style>
+
+<header>
+  <h1>spice-lanes ── 見本1：画づら</h1>
+  <p>同じ盤面を二通りで描いた。<kbd>スペース</kbd>で片方だけを見る（交互）。決めたら下のボタン。</p>
+</header>
+
+<div class="wrap" id="wrap">
+  <div class="pane" data-side="ko"><div class="tag">甲　海図</div><div id="ko"></div></div>
+  <div class="pane" data-side="otsu"><div class="tag">乙　夜の海</div><div id="otsu"></div></div>
+</div>
+
+<div class="bar">
+  <button id="b-ko">甲でいく</button>
+  <button id="b-otsu">乙でいく</button>
+  <button id="b-both">並べて見る</button>
+  <button class="bad" id="b-none">どちらも良くない</button>
+  <button id="b-dump">いまの設定を出す</button>
+</div>
+<pre class="out" id="out"></pre>
+<p class="note">
+  未踏は <b>0</b>、見えているところは <b>255</b> の二段だけ（一度剥がれたら永久に見える）。<br>
+  境界はくっきり。ぼかしは掛けていない ── 出どころは <code>gamedev/references/exploration.md</code>。
+</p>
+
+<script>
+/* ══ つまみ（ここだけが設定。個々には触らせない） ══════════════ */
+const SET = {
+  ko: {
+    name:'甲　海図', bg:'--ko-bg', sea:'--ko-sea', unknown:'--ko-unknown',
+    land:'--ko-land', line:'--ko-line', city:'--ko-city', lane:'--ko-lane',
+    ink:'--ko-ink', route:'--ko-route',
+    grid:true, glow:false, laneDash:'7 5', lineW:1.6, cityR:4.5, font:'Georgia,"Times New Roman",serif',
+    説明:'紙に描き足していく海図。未踏は「まだ描かれていない紙」で、黒ではない。方眼だけが引いてある'
+  },
+  otsu: {
+    name:'乙　夜の海', bg:'--otsu-bg', sea:'--otsu-sea', unknown:'--otsu-unknown',
+    land:'--otsu-land', line:'--otsu-line', city:'--otsu-city', lane:'--otsu-lane',
+    ink:'--otsu-ink', route:'--otsu-route',
+    grid:false, glow:true, laneDash:'', lineW:1.2, cityR:4, font:'system-ui,sans-serif',
+    説明:'黒い海に光が点いていく。未踏は真っ黒（0）。街と航路だけが光る'
+  }
+};
+
+/* ══ 盤面（両方まったく同じものを描く） ══════════════════════ */
+const W=520, H=380;
+const LANDS=[
+  {d:'M 40 96 L 96 70 L 150 82 L 176 120 L 150 160 L 92 166 L 46 140 Z', region:0},
+  {d:'M 236 208 L 292 186 L 340 206 L 348 250 L 306 282 L 250 272 L 226 240 Z', region:1},
+  {d:'M 396 84 L 452 74 L 486 106 L 472 148 L 420 156 L 390 126 Z', region:2}
+];
+const CITIES=[
+  {x:104,y:118,n:'ラ・コスタ',   good:'岩塩',  r:0},
+  {x:150,y:140,n:'ベルヌ',       good:'羊毛',  r:0},
+  {x:288,y:236,n:'サンティラ',   good:'丁子',  r:1},
+  {x:314,y:212,n:'モルガ',       good:'黒檀',  r:1},
+  {x:440,y:114,n:'アズハル',     good:'龍涎香',r:2}
+];
+const LANES=[ [0,2,4.4], [1,4,2.2] ];           /* 街i, 街j, 太さ */
+const PINS=[ {x:314,y:212}, {x:372,y:236}, {x:430,y:214}, {x:466,y:178} ];
+/* 未踏＝この多角形の外。剥がれているのは三つの円と航路の帯 */
+const SEEN=[ {x:108,y:120,r:104}, {x:292,y:236,r:96}, {x:438,y:114,r:82} ];
+
+function svg(k){
+  const s=SET[k], v=n=>`var(${n})`;
+  const glow = s.glow
+    ? `<filter id="g-${k}" x="-60%" y="-60%" width="220%" height="220%">
+         <feGaussianBlur stdDeviation="3.2" result="b"/>
+         <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter>` : '';
+  const grid = s.grid
+    ? `<pattern id="p-${k}" width="26" height="26" patternUnits="userSpaceOnUse">
+         <path d="M26 0 L0 0 0 26" fill="none" stroke="${v(s.line)}" stroke-width=".4" opacity=".28"/>
+       </pattern>` : '';
+  const mask = SEEN.map(c=>`<circle cx="${c.x}" cy="${c.y}" r="${c.r}" fill="#fff"/>`).join('')
+    + `<path d="M ${PINS.map(p=>p.x+' '+p.y).join(' L ')}" stroke="#fff" stroke-width="46"
+        stroke-linecap="round" stroke-linejoin="round" fill="none"/>`
+    + `<path d="M 314 212 L 288 236" stroke="#fff" stroke-width="46" stroke-linecap="round" fill="none"/>`;
+
+  const lands = LANDS.map(l=>
+    `<path d="${l.d}" fill="${v(s.land)}" stroke="${v(s.line)}" stroke-width="${s.lineW}"
+      stroke-linejoin="round"/>`).join('');
+
+  const lanes = LANES.map(([a,b,w])=>{
+    const A=CITIES[a], B=CITIES[b];
+    return `<line x1="${A.x}" y1="${A.y}" x2="${B.x}" y2="${B.y}" stroke="${v(s.lane)}"
+      stroke-width="${w}" stroke-linecap="round" ${s.laneDash?`stroke-dasharray="${s.laneDash}"`:''}
+      ${s.glow?`filter="url(#g-${k})"`:''} opacity=".92"/>`;
+  }).join('');
+
+  const cities = CITIES.map(c=>
+    `<g ${s.glow?`filter="url(#g-${k})"`:''}>
+       <circle cx="${c.x}" cy="${c.y}" r="${s.cityR}" fill="${v(s.city)}"
+         stroke="${v(s.bg)}" stroke-width="1.4"/>
+     </g>
+     <text x="${c.x+8}" y="${c.y-5}" font-family="${s.font}" font-size="10.5"
+       fill="${v(s.ink)}">${c.n}</text>
+     <text x="${c.x+8}" y="${c.y+6}" font-family="${s.font}" font-size="9"
+       fill="${v(s.ink)}" opacity=".62">${c.good}</text>`).join('');
+
+  const route = `<path d="M ${PINS.map(p=>p.x+' '+p.y).join(' L ')}"
+      fill="none" stroke="${v(s.route)}" stroke-width="1.4" stroke-dasharray="3 4" opacity=".85"/>`
+    + PINS.map((p,i)=>`<circle cx="${p.x}" cy="${p.y}" r="${i===PINS.length-1?3.4:2.4}"
+      fill="none" stroke="${v(s.route)}" stroke-width="1.3" opacity=".9"/>`).join('');
+
+  return `<svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">
+   <defs>${glow}${grid}
+     <mask id="m-${k}"><rect width="${W}" height="${H}" fill="#000"/>${mask}</mask>
+   </defs>
+   <rect width="${W}" height="${H}" fill="${v(s.unknown)}"/>
+   ${s.grid?`<rect width="${W}" height="${H}" fill="url(#p-${k})"/>`:''}
+   <g mask="url(#m-${k})">
+     <rect width="${W}" height="${H}" fill="${v(s.sea)}"/>
+     ${lands}
+   </g>
+   ${lanes}${cities}${route}
+   <g font-family="${s.font}" font-size="11" fill="${v(s.ink)}">
+     <rect x="12" y="${H-42}" width="284" height="30" rx="3"
+       fill="${v(s.bg)}" opacity=".82"/>
+     <text x="24" y="${H-22}">残り 7 ターン　　所持 1,240　　取り立て 4,000</text>
+   </g>
+ </svg>`;
+}
+
+document.getElementById('ko').innerHTML   = svg('ko');
+document.getElementById('otsu').innerHTML = svg('otsu');
+
+/* ══ 見せ方（甲⇄乙をその場で入れ替える。投げ直させない） ══════ */
+const panes=[...document.querySelectorAll('.pane')];
+let solo=-1;                                   /* -1=並べる, 0=甲だけ, 1=乙だけ */
+function paint(){ panes.forEach((p,i)=>p.classList.toggle('dim', solo>=0 && i!==solo)); }
+addEventListener('keydown',e=>{
+  if(e.code==='Space'){ e.preventDefault(); solo = solo===0?1:0; paint(); }
+});
+document.getElementById('b-both').onclick=()=>{ solo=-1; paint(); };
+
+/* ══ 選んだ結果を、そのまま貼れる文にする ══════════════════ */
+const out=document.getElementById('out');
+const btns=[...document.querySelectorAll('.bar button')];
+function show(t){ out.style.display='block'; out.textContent=t; }
+function mark(id){ btns.forEach(b=>b.classList.toggle('on', b.id===id)); }
+
+function chosen(k){
+  const s=SET[k];
+  mark(k==='ko'?'b-ko':'b-otsu');
+  solo = k==='ko'?0:1; paint();
+  show(
+`見本1（画づら）── ${s.name} を選んだ。2026-08-22
+
+${s.説明}
+
+つまみ（このセットをそのまま使う）
+  背景        ${cssv(s.bg)}
+  既踏の海    ${cssv(s.sea)}
+  未踏        ${cssv(s.unknown)}
+  陸          ${cssv(s.land)}
+  輪郭        ${cssv(s.line)}   太さ ${s.lineW}px
+  街          ${cssv(s.city)}   半径 ${s.cityR}px
+  航路        ${cssv(s.lane)}   太さ 1〜5px${s.laneDash?`　破線 ${s.laneDash}`:''}
+  探索の線    ${cssv(s.route)}  破線 3 4
+  文字        ${cssv(s.ink)}    ${s.font}
+  方眼        ${s.grid?'あり':'なし'}
+  発光        ${s.glow?'あり':'なし'}
+
+既定から変えたもの：なし（見本の既定セットのまま）`);
+}
+function cssv(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+
+document.getElementById('b-ko').onclick   = ()=>chosen('ko');
+document.getElementById('b-otsu').onclick = ()=>chosen('otsu');
+document.getElementById('b-none').onclick = ()=>{
+  mark('b-none');
+  show(
+`見本1（画づら）── どちらも良くない。2026-08-22
+
+これは「マシ」ではなく、答えが選択肢の外にあるという合図。
+値を詰めても良くならないので、次は別の軸を並べ直す。
+
+（mihon.md「どれも良くない」が返ってきたら）`);
+};
+document.getElementById('b-dump').onclick = ()=>{
+  show('甲 ── '+SET.ko.説明+'\n乙 ── '+SET.otsu.説明+
+       '\n\nどちらも盤面はまったく同じ（地域3・街5・航路2・探索の線1）。違うのは色と描き方だけ。');
+};
+</script>
