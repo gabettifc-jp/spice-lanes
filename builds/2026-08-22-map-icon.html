@@ -1,0 +1,246 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spice-lanes 見本16 ── マップ用は、その大きさで描く</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#171a21;color:#eef1f5;
+     font:14px/1.6 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+header{padding:16px 20px;border-bottom:1px solid #262b35}
+h1{margin:0 0 4px;font-size:15px;letter-spacing:.04em}
+header p{margin:0;font-size:12px;color:#9aa4b2}
+.q{margin:12px 20px 0;padding:10px 14px;border-left:3px solid #f0a63c;background:#1e222b;
+   border-radius:0 6px 6px 0;font-size:12.5px;color:#d8dee8;max-width:82ch}
+#hero{display:block;width:100%;max-width:960px;margin:14px auto 0;border-radius:16px;
+      border:1px solid #262b35;box-shadow:0 14px 46px rgba(0,0,0,.55)}
+.bar{display:flex;gap:8px;justify-content:center;padding:11px 20px 0;flex-wrap:wrap}
+button{font:inherit;font-size:12.5px;padding:7px 14px;border-radius:20px;border:1px solid #3b414d;
+       background:#1d212a;color:#e6e6e6;cursor:pointer}
+button.on{background:#f0a63c;border-color:#f0a63c;color:#1b1408;font-weight:700}
+.cmp{display:flex;gap:14px;justify-content:center;align-items:flex-end;padding:16px 20px 0;flex-wrap:wrap}
+.cmp figure{margin:0;text-align:center}
+.cmp canvas{display:block;background:#1c8fb4;border:1px solid #262b35;border-radius:8px}
+.cmp figcaption{font-size:10.5px;color:#79828f;margin-top:5px;max-width:190px;line-height:1.5}
+.ng{color:#e08a7a}.ok{color:#7ad0a8}
+footer{padding:16px 20px 26px;font-size:12px;color:#79828f;max-width:80ch}
+b{color:#eef1f5}
+</style>
+
+<header>
+  <h1>spice-lanes 見本16 ── マップ用は、その大きさで描く</h1>
+  <p>3Dから焼くのをやめた。<b>マップの船は、貼られる大きさで最初から描いた記号</b>にした。</p>
+</header>
+
+<div class="q">
+  <b>戦闘スプライトは、マップのスプライトより常に細かく動的</b> ── つまり<b>縮尺ごとに別の絵を持つのが定石</b>。<br>
+  <b>背の高いスプライトは世界地図で浮く。</b>16×16 は既に記号的で、引いた地図でも浮かない。<br>
+  <b>要素ごとに色は2〜3色だけ。</b>細い輪郭、はっきりしたハイライト、ディザは最小限。<br>
+  <span style="color:#9aa4b2">トップビューは実は斜め見下ろし。左右は反転で作れるが、上下はそれぞれ描く（1ポーズ3枚）。</span>
+</div>
+
+<canvas id="hero"></canvas>
+<div class="bar" id="bar"></div>
+<div class="cmp" id="cmp"></div>
+
+<footer>
+  <b>直したこと。</b>船を<b>船体の高さ基準で描き直した</b>（帆柱は船体長の0.85倍まで。前は2倍以上あって浮いていた）。
+  色は<b>要素ごとに2〜3色</b>。輪郭は太さ一定の暗い線。グラデーションはほぼ捨てた。<br>
+  <b>向きは3枚。</b>横（左右は反転）／上／下。トップビューの決まりに合わせた。<br>
+  <b>地図も減らした。</b>雲の影・粒・多層のグラデーションをやめ、海は2色、島は3色＋輪郭。
+</footer>
+
+<script>
+/* ══ マップ用の記号（その大きさで直接描く） ══════════════ */
+const OUT='#2a1c14';
+function ink(g,w){ g.strokeStyle=OUT; g.lineWidth=w; g.lineJoin='round'; g.lineCap='round'; }
+
+/* 船：横向き。斜め見下ろしなので、甲板の口が少し見える */
+function shipSide(g,S,rich){
+  /* S=1 でおよそ 64×54 */
+  const w=x=>x*S;
+  g.save();
+  /* 帆（船体長の0.85倍まで） */
+  g.beginPath();
+  g.moveTo(w(-2),w(-40)); g.quadraticCurveTo(w(20),w(-34),w(16),w(-8));
+  g.quadraticCurveTo(w(6),w(-12),w(-2),w(-10)); g.closePath();
+  g.fillStyle='#fdfbf2'; g.fill(); ink(g,w(3)); g.stroke();
+  g.beginPath(); g.moveTo(w(-2),w(-26)); g.quadraticCurveTo(w(11),w(-24),w(11),w(-11));
+  g.quadraticCurveTo(w(4),w(-13),w(-2),w(-12)); g.closePath();
+  g.fillStyle='#e6dfcd'; g.fill();
+  /* 帆柱 */
+  g.beginPath(); g.moveTo(w(-2),w(-42)); g.lineTo(w(-2),w(-6));
+  ink(g,w(4)); g.stroke(); g.strokeStyle='#b58a52'; g.lineWidth=w(2.2); g.stroke();
+  /* 旗 */
+  g.beginPath(); g.moveTo(w(-2),w(-44)); g.lineTo(w(-16),w(-40)); g.lineTo(w(-2),w(-36));
+  g.closePath(); g.fillStyle='#f45c62'; g.fill(); ink(g,w(2.4)); g.stroke();
+  /* 船体（三日月。下ほど濃い二色） */
+  g.beginPath();
+  g.moveTo(w(-26),w(-8)); g.quadraticCurveTo(w(-30),w(6),w(-12),w(10));
+  g.quadraticCurveTo(w(8),w(14),w(26),w(6)); g.quadraticCurveTo(w(34),w(2),w(30),w(-8));
+  g.closePath();
+  g.fillStyle='#c4643c'; g.fill();
+  g.save(); g.clip();
+  g.beginPath(); g.rect(w(-40),w(2),w(90),w(20)); g.fillStyle='#9d4a2a'; g.fill(); g.restore();
+  ink(g,w(3.4)); g.stroke();
+  /* 甲板の口（斜め見下ろしの証拠） */
+  g.beginPath(); g.ellipse(w(1),w(-7),w(24),w(4.6),0,0,7);
+  g.fillStyle='#f5cf8e'; g.fill(); ink(g,w(2.6)); g.stroke();
+  if(rich){                      /* 比べる用：細部を足した版 */
+    g.strokeStyle='rgba(60,36,20,.5)'; g.lineWidth=w(.8);
+    for(let i=-3;i<=3;i++){ g.beginPath(); g.moveTo(w(i*7),w(-6)); g.lineTo(w(i*7-2),w(9)); g.stroke(); }
+    for(let i=1;i<=4;i++){ g.beginPath(); g.moveTo(w(-2),w(-38+i*6)); g.lineTo(w(14-i),w(-36+i*6)); g.stroke(); }
+    g.strokeStyle='rgba(255,255,255,.55)'; g.lineWidth=w(1);
+    g.beginPath(); g.moveTo(w(-24),w(-7)); g.quadraticCurveTo(w(0),w(-3),w(28),w(-7)); g.stroke();
+  }
+  g.restore();
+}
+function shipTop(g,S,dir){       /* 上・下向き（別に描く） */
+  const w=x=>x*S; g.save(); if(dir<0) g.scale(1,-1);
+  g.beginPath(); g.ellipse(0,w(2),w(13),w(24),0,0,7);
+  g.fillStyle='#c4643c'; g.fill(); ink(g,w(3.4)); g.stroke();
+  g.beginPath(); g.ellipse(0,w(2),w(8.5),w(17),0,0,7);
+  g.fillStyle='#f5cf8e'; g.fill(); ink(g,w(2.4)); g.stroke();
+  g.beginPath(); g.moveTo(w(-14),w(-4)); g.quadraticCurveTo(0,w(-16),w(14),w(-4));
+  g.quadraticCurveTo(0,w(2),w(-14),w(-4)); g.closePath();
+  g.fillStyle='#fdfbf2'; g.fill(); ink(g,w(3)); g.stroke();
+  g.beginPath(); g.arc(0,w(-2),w(2.6),0,7); g.fillStyle='#b58a52'; g.fill(); ink(g,w(2)); g.stroke();
+  g.restore();
+}
+function tree(g,S){ const w=x=>x*S; g.save();
+  g.beginPath(); g.moveTo(w(-2.4),w(0)); g.lineTo(w(-1.6),w(-11)); g.lineTo(w(1.6),w(-11));
+  g.lineTo(w(2.4),w(0)); g.closePath(); g.fillStyle='#9a6a3e'; g.fill(); ink(g,w(2.2)); g.stroke();
+  g.beginPath(); g.ellipse(0,w(-15),w(9),w(8),0,0,7); g.fillStyle='#5fb762'; g.fill();
+  ink(g,w(2.6)); g.stroke();
+  g.beginPath(); g.ellipse(w(-2.6),w(-17.5),w(4.4),w(3.6),0,0,7); g.fillStyle='#8ede84'; g.fill();
+  g.restore(); }
+function hut(g,S){ const w=x=>x*S; g.save();
+  g.beginPath(); g.rect(w(-7),w(-9),w(14),w(9)); g.fillStyle='#f6ead0'; g.fill(); ink(g,w(2.6)); g.stroke();
+  g.beginPath(); g.moveTo(w(-10),w(-9)); g.lineTo(0,w(-19)); g.lineTo(w(10),w(-9)); g.closePath();
+  g.fillStyle='#e07050'; g.fill(); ink(g,w(2.6)); g.stroke();
+  g.restore(); }
+
+/* ══ 地図（減らした） ══════════════════════════════ */
+const ISLES=[
+ {x:-250,z:-165,r:92,seed:3,name:'ベルヌ',good:'羊毛',
+  props:[[-.3,-.15,'t'],[.24,.2,'t'],[.04,-.5,'h'],[.46,-.26,'t']]},
+ {x: 250,z: 140,r:72,seed:9,name:'サンティラ',good:'丁子',props:[[0,0,'t'],[-.4,.3,'h']]},
+ {x: 195,z:-255,r:52,seed:17,name:'アズハル',good:'龍涎香',props:[[0,-.1,'t']]},
+ {x:-330,z: 248,r:60,seed:23,name:'モルガ',good:'黒檀',props:[[.1,.1,'t'],[-.34,-.2,'h']]}
+];
+const PATH=[[-250,-165],[-30,-30],[250,140]];
+const shape=(is,k)=>{ const a=k*Math.PI*2,
+  j=.9+.14*Math.sin(k*12+is.seed)+.07*Math.sin(k*29+is.seed*2);
+  return [is.x+Math.cos(a)*is.r*j, is.z+Math.sin(a)*is.r*j]; };
+
+let T=0, showFog=true, moving=true, dir='side';
+function render(cv){
+  const dpr=Math.min(2,devicePixelRatio||1), w=cv.clientWidth||300, h=Math.round(w*.60);
+  cv.width=w*dpr; cv.height=h*dpr;
+  const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  const S=w/900, px=x=>w/2+x*S, py=z=>h/2+z*S;
+
+  g.fillStyle='#2fb0d0'; g.fillRect(0,0,w,h);                 /* 海：二色だけ */
+  g.fillStyle='#249ec0';
+  for(let i=0;i<14;i++){ const yy=(i*46+T*9)%(h+40)-20;
+    g.fillRect(0,yy,w,Math.max(2,3*S*2)); }
+  /* 航路 */
+  const A=ISLES[0],B=ISLES[1];
+  g.save(); g.setLineDash([9*S*2,8*S*2]); g.lineDashOffset=-T*22*S*2;
+  g.beginPath(); g.moveTo(px(A.x),py(A.z)); g.lineTo(px(B.x),py(B.z));
+  g.strokeStyle='#ffd77a'; g.lineWidth=Math.max(2.4,5*S*2); g.lineCap='round'; g.stroke(); g.restore();
+  /* 島：3色＋輪郭 */
+  ISLES.forEach(is=>{
+    const pts=[]; for(let k=0;k<44;k++) pts.push(shape(is,k/44));
+    const path=(f,dx=0,dy=0)=>{ g.beginPath();
+      pts.forEach(([x,z],i)=>{ const X=px(is.x+(x-is.x)*f)+dx, Y=py(is.z+(z-is.z)*f)+dy;
+        i?g.lineTo(X,Y):g.moveTo(X,Y); }); g.closePath(); };
+    path(1,4*S*2,6*S*2); g.fillStyle='rgba(6,44,64,.30)'; g.fill();
+    path(1); g.fillStyle='#f2dda2'; g.fill(); ink(g,Math.max(2.2,4.4*S*2)); g.stroke();
+    path(.74); g.fillStyle='#63b665'; g.fill(); ink(g,Math.max(1.6,3*S*2)); g.stroke();
+    path(.42); g.fillStyle='#8ad47e'; g.fill();
+  });
+  /* 立つもの：小さい記号 */
+  const items=[];
+  ISLES.forEach(is=>is.props.forEach(([ax,az,k])=>
+    items.push({z:is.z+az*is.r,X:px(is.x+ax*is.r),Y:py(is.z+az*is.r),k}) ));
+  const u=(T*.05)%2, seg=u<1?0:1, uu=u<1?u:u-1, e=uu*uu*(3-2*uu);
+  const a0=PATH[seg], b0=PATH[seg+1];
+  const sx=a0[0]+(b0[0]-a0[0])*e, sz=a0[1]+(b0[1]-a0[1])*e;
+  items.push({z:sz,X:px(sx),Y:py(sz)+Math.sin(T*2.4)*2.4,k:'ship',flip:(b0[0]-a0[0])<0});
+  items.sort((p,q)=>p.z-q.z).forEach(it=>{
+    g.save(); g.beginPath();
+    g.ellipse(it.X,it.Y+ (it.k==='ship'?5*S*2:1*S*2), (it.k==='ship'?24:8)*S*2,
+              (it.k==='ship'?6:3)*S*2,0,0,7);
+    g.fillStyle='rgba(6,44,64,.28)'; g.fill(); g.restore();
+    g.save(); g.translate(it.X,it.Y);
+    if(it.k==='ship'){ const sc=S*2*.62;
+      if(dir==='side'){ if(it.flip) g.scale(-1,1); shipSide(g,sc,false); }
+      else shipTop(g,sc,dir==='up'?1:-1); }
+    else if(it.k==='t') tree(g,S*2*.7); else hut(g,S*2*.7);
+    g.restore(); });
+  /* 名札 */
+  ISLES.forEach(is=>{ const X=px(is.x), Y=py(is.z)-is.r*S*.62;
+    g.font=`700 ${12*S*2}px system-ui,sans-serif`;
+    const tw=g.measureText(is.name).width, ww=tw+26*S*2, hh=24*S*2, x=X-ww/2, y=Y-hh/2;
+    g.beginPath(); g.moveTo(x+hh/2,y); g.arcTo(x+ww,y,x+ww,y+hh,hh/2);
+    g.arcTo(x+ww,y+hh,x,y+hh,hh/2); g.arcTo(x,y+hh,x,y,hh/2); g.arcTo(x,y,x+ww,y,hh/2);
+    g.closePath(); g.fillStyle='#fffaee'; g.fill(); ink(g,Math.max(1.6,3*S*2)); g.stroke();
+    g.fillStyle='#3a2a1c'; g.textAlign='center'; g.textBaseline='middle';
+    g.fillText(is.name,X,y+hh*.42);
+    g.font=`600 ${9*S*2}px system-ui,sans-serif`; g.fillStyle='rgba(58,42,28,.62)';
+    g.fillText(is.good,X,y+hh*.76); g.textAlign='start'; });
+  /* 未踏：境目はくっきり */
+  if(showFog){ g.save(); g.beginPath(); g.rect(0,0,w,h);
+    ISLES.forEach(is=>{ g.moveTo(px(is.x)+is.r*2.05*S,py(is.z));
+      g.arc(px(is.x),py(is.z),is.r*2.05*S,0,7,true); });
+    g.moveTo(px(sx)+150*S,py(sz)); g.arc(px(sx),py(sz),150*S,0,7,true);
+    g.fillStyle='#cfe6ee'; g.fill('evenodd'); g.restore(); }
+  drawUI(g,w,h);
+}
+function drawUI(g,w,h){
+  const R=(x,y,ww,hh,r)=>{ g.beginPath(); g.moveTo(x+r,y);
+    g.arcTo(x+ww,y,x+ww,y+hh,r); g.arcTo(x+ww,y+hh,x,y+hh,r);
+    g.arcTo(x,y+hh,x,y,r); g.arcTo(x,y,x+ww,y,r); g.closePath(); };
+  const U=w/960, pill=(x,y,ww,hh,fill,txt,sub)=>{ R(x,y,ww,hh,hh/2);
+    g.fillStyle=fill; g.fill(); ink(g,Math.max(1.6,3*U)); g.stroke();
+    g.fillStyle='#3a2a1c'; g.textBaseline='middle'; g.font=`700 ${hh*.44}px system-ui,sans-serif`;
+    g.fillText(txt,x+hh*.8,y+hh*.56); g.fillStyle='rgba(58,42,28,.6)';
+    g.font=`600 ${hh*.28}px system-ui,sans-serif`; g.fillText(sub,x+hh*.8,y+hh*.22); };
+  pill(16*U,16*U,150*U,42*U,'#fff6dc','1,240','所持');
+  pill(w-180*U,16*U,164*U,42*U,'#ffe0e0','4,000','取り立てまで 7');
+  const bt=(cx,cy,r,fill,label)=>{ g.beginPath(); g.arc(cx,cy,r,0,7);
+    g.fillStyle=fill; g.fill(); ink(g,Math.max(1.8,3.4*U)); g.stroke();
+    g.fillStyle='#fff'; g.font=`700 ${r*.46}px system-ui,sans-serif`;
+    g.textAlign='center'; g.textBaseline='middle'; g.fillText(label,cx,cy); g.textAlign='start'; };
+  const by=h-40*U, br=28*U;
+  bt(w/2-84*U,by,br,'#4fb8f0','繋ぐ'); bt(w/2,by+3*U,br*1.14,'#f0a63c','出す');
+  bt(w/2+84*U,by,br,'#8f8f9c','待つ');
+}
+
+/* ── 比べる：記号 vs 細部を足した版 ── */
+const cmp=document.getElementById('cmp');
+[[false,'記号（2〜3色・太い輪郭・グラデ無し）','ok'],
+ [true, '細部を足した版（板目・縫い目・照り）','ng']].forEach(([rich,label,cls])=>{
+  [1.5,0.62,0.34].forEach((sc,i)=>{
+    const cv=document.createElement('canvas'), dpr=2, W=Math.round(150*(i?1:1)), H=Math.round(120);
+    cv.width=W*dpr; cv.height=H*dpr; cv.style.width=W+'px'; cv.style.height=H+'px';
+    const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+    g.fillStyle='#2fb0d0'; g.fillRect(0,0,W,H);
+    g.save(); g.translate(W/2,H*.62); shipSide(g,sc*1.6,rich); g.restore();
+    const f=document.createElement('figure'); f.appendChild(cv);
+    const c=document.createElement('figcaption');
+    c.innerHTML=`<span class="${cls}">■</span> ${i===0?label:['','地図の大きさ','さらに引いたとき'][i]}`;
+    f.appendChild(c); cmp.appendChild(f); });
+});
+
+const bar=document.getElementById('bar');
+[['横向き',()=>dir='side'],['上向き',()=>dir='up'],['下向き',()=>dir='down'],
+ ['霧',()=>showFog=!showFog],['止める',()=>moving=!moving]].forEach(([l,f],i)=>{
+  const b=document.createElement('button'); b.textContent=l; if(!i) b.className='on';
+  b.onclick=()=>{ f(); if(i<3){ [...bar.children].slice(0,3).forEach(c=>c.className='');
+    b.className='on'; } };
+  bar.appendChild(b); });
+
+const hero=document.getElementById('hero');
+addEventListener('resize',()=>render(hero));
+(function frame(){ if(moving) T+=1/60; render(hero); requestAnimationFrame(frame); })();
+</script>
