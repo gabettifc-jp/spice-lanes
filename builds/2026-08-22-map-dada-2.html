@@ -1,0 +1,233 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spice-lanes 見本23 ── 群れる見下ろしの手つきで、地図と船</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#12141a;color:#eef1f5;
+     font:14px/1.6 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+header{padding:14px 20px;border-bottom:1px solid #262b35}
+h1{margin:0 0 3px;font-size:15px}
+header p{margin:0;font-size:12px;color:#9aa4b2}
+#c{display:block;width:100%;max-width:940px;margin:14px auto 0;border-radius:16px;border:1px solid #262b35}
+.cmp{display:flex;gap:12px;justify-content:center;align-items:flex-end;padding:16px 20px 0;flex-wrap:wrap}
+.cmp figure{margin:0;text-align:center}
+.cmp canvas{display:block;border:1px solid #262b35;border-radius:10px}
+.cmp figcaption{font-size:10.5px;color:#79828f;margin-top:5px}
+footer{padding:14px 20px 26px;font-size:12px;color:#79828f;max-width:80ch}
+b{color:#eef1f5}
+</style>
+<header>
+  <h1>spice-lanes 見本23 ── 群れる見下ろしの手つきで、地図と船</h1>
+  <p>見本22から、甲板と帆だけ直した。土台の作りは見本21のまま。<b>太い暗い輪郭／上の照り／足元の影と白い輪／明るい色</b>。船の上辺だけ、丸をやめた。</p>
+</header>
+<canvas id="c"></canvas>
+<div class="cmp" id="cmp"></div>
+<footer>
+  <b>持ってきたもの。</b>形は楕円だけで組む／輪郭は太く暗く一定／面の上に白い照りを一枚／
+  足元に影の楕円と白い輪／色は要素ごとに2色／ゆっくり上下する。<br>
+  <b>甲板は直線にした。</b>船体を楕円で作って上を切ると、甲板がドームに見える。上辺を直線にして、明るい帯を船体の中に一本敷いた（帯に輪郭は付けない。付けると船体の輪郭と重なって黒い棒に見える）。<br><b>帆は一枚。</b>左の小さい帆を落とした。
+</footer>
+<script>
+const OUT='#1a2028';
+const CV=document.getElementById('c'); let g=CV.getContext('2d');
+let W=940,H=560;
+function fit(){ W=Math.min(940,CV.clientWidth||940); H=Math.round(W*0.60);
+  CV.width=W*2; CV.height=H*2; g.setTransform(2,0,0,2,0,0); }
+addEventListener('resize',fit); fit();
+const R=(s=>()=>((s=s*16807%2147483647)-1)/2147483646)(20260822);
+
+const C={ sea:'#2fb2d8', sea2:'#2699c4', deep:'#1d7fa8', foam:'#eafcff',
+  sand:'#f7dc9a', sand2:'#dcb96c', grass:'#6ccf62', grass2:'#4aa848',
+  hull:'#e2703c', hull2:'#b04e24', deck:'#ffd98a', sail:'#fdfbf2', sail2:'#e2d8bf',
+  mast:'#b07a44', flag:'#f2504c', win:'#6fe0f0', trunk:'#a8703c', leaf:'#5fc45c',
+  wall:'#fff2d6', roof:'#f0714c', lane:'#ffd45c' };
+
+function el(x,y,rx,ry,fill,lw){ g.beginPath(); g.ellipse(x,y,rx,ry,0,0,7);
+  g.fillStyle=fill; g.fill(); if(lw){ g.strokeStyle=OUT; g.lineWidth=lw; g.stroke(); } }
+function sheen(x,y,rx,ry,a=.26){ g.beginPath(); g.ellipse(x,y,rx,ry,0,0,7);
+  g.fillStyle=`rgba(255,255,255,${a})`; g.fill(); }
+function shadow(x,y,rx,ry,a=.26){ g.beginPath(); g.ellipse(x,y,rx,ry,0,0,7);
+  g.fillStyle=`rgba(8,34,52,${a})`; g.fill(); }
+
+/* ══ 船：甲板は直線。帆は一枚 ══════════════════════ */
+function ship(s,t){
+  const w=v=>v*s, bob=Math.sin(t*2.2)*s*.5;
+  g.save(); g.translate(0,bob);
+  g.lineJoin='round'; g.lineCap='round';
+  /* 帆は一枚だけ（右） */
+  g.beginPath(); g.moveTo(w(-2),w(-31)); g.quadraticCurveTo(w(21),w(-27),w(16),w(-8));
+  g.quadraticCurveTo(w(6),w(-11),w(-2),w(-10)); g.closePath();
+  g.fillStyle=C.sail; g.fill(); g.strokeStyle=OUT; g.lineWidth=w(2.8); g.stroke();
+  g.beginPath(); g.moveTo(w(-2),w(-24)); g.quadraticCurveTo(w(11),w(-21),w(9),w(-10));
+  g.quadraticCurveTo(w(3),w(-11),w(-2),w(-11)); g.closePath();
+  g.fillStyle=C.sail2; g.fill();
+  /* 帆柱 */
+  g.beginPath(); g.moveTo(w(-2),w(-34)); g.lineTo(w(-2),w(-6));
+  g.strokeStyle=OUT; g.lineWidth=w(4.8); g.stroke();
+  g.strokeStyle=C.mast; g.lineWidth=w(2.8); g.stroke();
+  /* 旗 */
+  g.beginPath(); g.moveTo(w(-2),w(-36)); g.lineTo(w(9),w(-32.5)); g.lineTo(w(-2),w(-29));
+  g.closePath(); g.fillStyle=C.flag; g.fill(); g.strokeStyle=OUT; g.lineWidth=w(2.2); g.stroke();
+  /* 船体：上辺は直線。下だけ丸い。甲板の帯は輪郭を持たず、船体の中に入れる */
+  g.beginPath();
+  g.moveTo(w(-27),w(-8));
+  g.lineTo(w(27),w(-8));                                  /* ← 甲板の線（まっすぐ） */
+  g.quadraticCurveTo(w(28),w(3),w(19),w(9));
+  g.quadraticCurveTo(w(2),w(13),w(-16),w(9));
+  g.quadraticCurveTo(w(-27),w(4),w(-27),w(-8));
+  g.closePath();
+  g.fillStyle=C.hull; g.fill();
+  g.save(); g.clip();
+  g.fillStyle=C.hull2; g.fillRect(w(-32),w(2),w(66),w(20));   /* 下半分を濃く */
+  g.fillStyle=C.deck;  g.fillRect(w(-32),w(-8),w(66),w(4.2)); /* 甲板＝上の帯。輪郭は付けない */
+  g.restore();
+  g.strokeStyle=OUT; g.lineWidth=w(3.6); g.stroke();
+  /* 丸窓＝顔 */
+  [[-12,1.7],[0,2.2],[12,1.7]].forEach(([x,r],i)=>{
+    el(w(x),w(2),w(r+1),w(r+1),OUT,0);
+    el(w(x),w(1.7),w(r),w(r),C.win,0);
+    if(i!==1) el(w(x+.4),w(1.3),w(r*.4),w(r*.4),'#fff',0); });
+  /* 喫水の白い泡 */
+  g.beginPath(); g.moveTo(w(-33),w(10)); g.quadraticCurveTo(w(-12),w(6),w(4),w(10));
+  g.quadraticCurveTo(w(20),w(14),w(35),w(9));
+  g.strokeStyle=C.foam; g.lineWidth=w(3.6); g.stroke();
+  g.restore();
+}
+function tree(s){ const w=v=>v*s;
+  g.beginPath(); g.moveTo(w(-2.2),0); g.lineTo(w(-1.4),w(-9)); g.lineTo(w(1.4),w(-9));
+  g.lineTo(w(2.2),0); g.closePath(); g.fillStyle=C.trunk; g.fill();
+  g.strokeStyle=OUT; g.lineWidth=w(2.2); g.lineJoin='round'; g.stroke();
+  el(0,w(-14),w(8),w(7),C.leaf,w(2.6)); sheen(w(-2.4),w(-16.4),w(3.6),w(2.6),.34); }
+function hut(s){ const w=v=>v*s;
+  g.beginPath(); g.rect(w(-6),w(-8),w(12),w(8)); g.fillStyle=C.wall; g.fill();
+  g.strokeStyle=OUT; g.lineWidth=w(2.4); g.stroke();
+  g.beginPath(); g.moveTo(w(-9),w(-8)); g.lineTo(0,w(-17)); g.lineTo(w(9),w(-8));
+  g.closePath(); g.fillStyle=C.roof; g.fill(); g.strokeStyle=OUT; g.lineWidth=w(2.4); g.stroke();
+  sheen(w(-3),w(-12),w(2.6),w(1.8),.4); }
+
+/* ══ 地図 ══════════════════════════════════════════ */
+const ISLES=[
+ {x:-250,z:-150,r:96,seed:3,name:'ベルヌ',good:'羊毛',props:[[-.3,-.12,'t'],[.26,.2,'t'],[.05,-.5,'h'],[.5,-.2,'t']]},
+ {x: 265,z: 150,r:76,seed:9,name:'サンティラ',good:'丁子',props:[[0,0,'t'],[-.42,.3,'h']]},
+ {x: 210,z:-250,r:56,seed:17,name:'アズハル',good:'龍涎香',props:[[0,-.1,'t']]},
+ {x:-330,z: 250,r:62,seed:23,name:'モルガ',good:'黒檀',props:[[.1,.1,'t'],[-.36,-.2,'h']]}
+];
+const PATH=[[-176,-92],[-20,-10],[196,102]];   /* 島の縁＝港から港へ */
+const shape=(is,k)=>{ const a=k*Math.PI*2,
+  j=.9+.13*Math.sin(k*11+is.seed)+.07*Math.sin(k*27+is.seed*2);
+  return [is.x+Math.cos(a)*is.r*j, is.z+Math.sin(a)*is.r*j]; };
+let T=0;
+function frame(){
+  T+=1/60;
+  const S=W/900, px=x=>W/2+x*S, py=z=>H/2+z*S, U=S*2;
+  /* 海：二色＋白い短い波 */
+  g.fillStyle=C.sea; g.fillRect(0,0,W,H);
+  for(let i=0;i<9;i++){ g.fillStyle=C.sea2;
+    const yy=(i*74+T*7)%(H+80)-40; g.fillRect(0,yy,W,26*S); }
+  g.fillStyle=C.foam; g.globalAlpha=.75;
+  for(let i=0;i<26;i++){ const x=((i*271+T*14)%(W+120))-60, y=((i*163)%H);
+    g.fillRect(x,y,26*S,3.4*S); }
+  g.globalAlpha=1;
+  /* 航路：太い点線＋暗い縁 */
+  const A=ISLES[0],B=ISLES[1];
+  g.save(); g.setLineDash([13*S,11*S]); g.lineDashOffset=-T*26*S; g.lineCap='round';
+  g.beginPath(); g.moveTo(px(A.x),py(A.z)); g.lineTo(px(B.x),py(B.z));
+  g.strokeStyle=OUT; g.lineWidth=9*S; g.stroke();
+  g.strokeStyle=C.lane; g.lineWidth=5.4*S; g.stroke(); g.restore();
+  /* 島：丸い塊。砂→草の二段。太い輪郭と上の照り */
+  ISLES.forEach(is=>{
+    const pts=[]; for(let k=0;k<46;k++) pts.push(shape(is,k/46));
+    const path=(f,dx=0,dy=0)=>{ g.beginPath();
+      pts.forEach(([x,z],i)=>{ const X=px(is.x+(x-is.x)*f)+dx, Y=py(is.z+(z-is.z)*f)+dy;
+        i?g.lineTo(X,Y):g.moveTo(X,Y); }); g.closePath(); };
+    path(1.04); g.strokeStyle=C.foam; g.lineWidth=3.4*S; g.stroke();   /* 白い泡の縁 */
+    path(1,0,5*S); g.fillStyle='rgba(8,34,52,.26)'; g.fill();
+    path(1); g.fillStyle=C.sand; g.fill();
+      g.strokeStyle=OUT; g.lineWidth=5*S; g.lineJoin='round'; g.stroke();
+    path(.98,0,4*S); g.save(); g.clip(); path(1); g.fillStyle=C.sand2; g.fill(); g.restore();
+    path(.7); g.fillStyle=C.grass; g.fill();
+      g.strokeStyle=OUT; g.lineWidth=3.6*S; g.stroke();
+    path(.68,0,3*S); g.save(); g.clip(); path(.7); g.fillStyle=C.grass2; g.fill(); g.restore();
+    g.save(); path(.7); g.clip();
+      sheen(px(is.x)-is.r*.22*S,py(is.z)-is.r*.3*S,is.r*.42*S,is.r*.24*S,.30); g.restore();
+  });
+  /* 立つもの */
+  const items=[];
+  ISLES.forEach(is=>is.props.forEach(([ax,az,k])=>
+    items.push({z:is.z+az*is.r,X:px(is.x+ax*is.r),Y:py(is.z+az*is.r),k})));
+  const u=(T*.05)%2, seg=u<1?0:1, uu=u<1?u:u-1, e=uu*uu*(3-2*uu);
+  const a0=PATH[seg], b0=PATH[seg+1];
+  const sx=a0[0]+(b0[0]-a0[0])*e, sz=a0[1]+(b0[1]-a0[1])*e;
+  items.push({z:sz,X:px(sx),Y:py(sz),k:'ship',flip:(b0[0]-a0[0])<0});
+  items.sort((p,q)=>p.z-q.z).forEach(it=>{
+    if(it.k==='ship'){ shadow(it.X,it.Y+9*S,34*S,10*S,.30);
+      g.save(); g.translate(it.X,it.Y); if(it.flip) g.scale(-1,1); ship(S*1.34,T); g.restore(); }
+    else { shadow(it.X,it.Y+1.5*S,7*S,3*S,.26);
+      g.save(); g.translate(it.X,it.Y); (it.k==='t'?tree:hut)(S*1.5); g.restore(); } });
+  /* 名札 */
+  ISLES.forEach(is=>{ const up=py(is.z)-is.r*S*.78;
+    const X=px(is.x), Y=(up<74*S? py(is.z)+is.r*S*.86 : up);
+    g.font=`800 ${13*S}px system-ui,sans-serif`;
+    const tw=g.measureText(is.name).width, ww=tw+30*S, hh=27*S, x=X-ww/2, y=Y-hh/2;
+    g.beginPath(); g.moveTo(x+hh/2,y); g.arcTo(x+ww,y,x+ww,y+hh,hh/2);
+    g.arcTo(x+ww,y+hh,x,y+hh,hh/2); g.arcTo(x,y+hh,x,y,hh/2); g.arcTo(x,y,x+ww,y,hh/2);
+    g.closePath(); g.fillStyle='#fffaee'; g.fill();
+    g.strokeStyle=OUT; g.lineWidth=3.4*S; g.stroke();
+    g.fillStyle='#2a3038'; g.textAlign='center'; g.textBaseline='middle';
+    g.fillText(is.name,X,y+hh*.4);
+    g.font=`700 ${9.5*S}px system-ui,sans-serif`; g.fillStyle='rgba(42,48,56,.62)';
+    g.fillText(is.good,X,y+hh*.74); g.textAlign='start'; });
+  /* 未踏の霧：別の面に描いて穴を開ける（穴どうしが重なっても正しく抜ける） */
+  if(!window.__fog){ window.__fog=document.createElement('canvas'); }
+  const fc=window.__fog; if(fc.width!==CV.width){ fc.width=CV.width; fc.height=CV.height; }
+  const fg=fc.getContext('2d'); fg.setTransform(2,0,0,2,0,0);
+  fg.clearRect(0,0,W,H);
+  fg.globalCompositeOperation='source-over';
+  fg.fillStyle='rgba(20,54,80,.66)'; fg.fillRect(0,0,W,H);
+  fg.globalCompositeOperation='destination-out';
+  const hole=(X,Y,r)=>{ const gr=fg.createRadialGradient(X,Y,r*.72,X,Y,r);
+    gr.addColorStop(0,'rgba(0,0,0,1)'); gr.addColorStop(1,'rgba(0,0,0,0)');
+    fg.fillStyle=gr; fg.beginPath(); fg.arc(X,Y,r,0,7); fg.fill(); };
+  ISLES.forEach(is=>hole(px(is.x),py(is.z),is.r*2.0*S));
+  hole(px(sx),py(sz),150*S);
+  fg.globalCompositeOperation='source-over';
+  g.drawImage(fc,0,0,W,H);
+
+  /* UI：丸い塊＋太い輪郭 */
+  const pill=(x,y,ww,hh,fill,txt,sub)=>{
+    g.beginPath(); g.moveTo(x+hh/2,y); g.arcTo(x+ww,y,x+ww,y+hh,hh/2);
+    g.arcTo(x+ww,y+hh,x,y+hh,hh/2); g.arcTo(x,y+hh,x,y,hh/2); g.arcTo(x,y,x+ww,y,hh/2);
+    g.closePath(); g.fillStyle=fill; g.fill(); g.strokeStyle=OUT; g.lineWidth=3.6*S; g.stroke();
+    g.fillStyle='#2a3038'; g.textBaseline='middle';
+    g.font=`800 ${hh*.44}px system-ui,sans-serif`; g.fillText(txt,x+hh*.8,y+hh*.56);
+    g.fillStyle='rgba(42,48,56,.6)'; g.font=`700 ${hh*.28}px system-ui,sans-serif`;
+    g.fillText(sub,x+hh*.8,y+hh*.22); };
+  pill(16*S,16*S,168*S,46*S,'#fff6dc','1,240','所持');
+  pill(W-206*S,16*S,190*S,46*S,'#ffe0e0','4,000','取り立てまで 7');
+  const bt=(cx,cy,r,fill,label)=>{ g.beginPath(); g.arc(cx,cy,r,0,7);
+    g.fillStyle=fill; g.fill(); g.strokeStyle=OUT; g.lineWidth=4*S; g.stroke();
+    g.beginPath(); g.ellipse(cx-r*.22,cy-r*.3,r*.46,r*.26,0,0,7);
+    g.fillStyle='rgba(255,255,255,.32)'; g.fill();
+    g.fillStyle='#fff'; g.font=`800 ${r*.5}px system-ui,sans-serif`;
+    g.textAlign='center'; g.textBaseline='middle'; g.fillText(label,cx,cy+r*.04); g.textAlign='start'; };
+  const by=H-46*S, br=32*S;
+  bt(W/2-96*S,by,br,'#4fc0f0','繋ぐ'); bt(W/2,by+4*S,br*1.16,'#f5a63c','出す');
+  bt(W/2+96*S,by,br,'#9aa4b2','待つ');
+  requestAnimationFrame(frame);
+}
+frame();
+/* ── 船を三つの大きさで ── */
+const cmp=document.getElementById('cmp');
+const realG=g;
+[[2.6,'大きく'],[1.16,'地図の大きさ'],[0.7,'さらに引いたとき']].forEach(([sc,label])=>{
+  const cv=document.createElement('canvas'); cv.width=200*2; cv.height=150*2;
+  cv.style.width='200px'; cv.style.height='150px';
+  const gg=cv.getContext('2d'); gg.setTransform(2,0,0,2,0,0);
+  gg.fillStyle=C.sea; gg.fillRect(0,0,200,150);
+  gg.fillStyle=C.sea2; for(let i=0;i<3;i++) gg.fillRect(0,i*46+10,200,14);
+  g=gg; gg.save(); gg.translate(100,92); ship(sc,0); gg.restore(); g=realG;
+  const f=document.createElement('figure'); f.appendChild(cv);
+  const c=document.createElement('figcaption'); c.textContent=label; f.appendChild(c);
+  cmp.appendChild(f);
+});
+</script>
