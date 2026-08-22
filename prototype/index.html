@@ -1,0 +1,588 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spice-lanes 2-b ── 一回が一通り回る</title>
+<style>
+*{box-sizing:border-box}
+html,body{margin:0;height:100%;background:#0e1420;color:#eef1f5;overflow:hidden;
+  font:13px/1.5 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif;
+  -webkit-user-select:none;user-select:none}
+#c{display:block;width:100%;height:100%;cursor:crosshair}
+</style>
+<canvas id="c"></canvas>
+<script>
+/* ══════════════════════════════════════════════════════════════
+   つまみ ── 数値はここだけ（gamedev/CLAUDE.md「数値」）
+   値は全部 仮。捨てる日＝2-b を触り終えた時点
+   ══════════════════════════════════════════════════════════════ */
+const K = {
+  /* ── 地図（決定55・58・36・51・52） ── */
+  COLS: 128, ROWS: 80,          /* 地図の升目。広い版 */
+  CELL: 14,                     /* 一升の大きさ（寄りのとき） */
+  REGIONS: 3,                   /* 地域の数（決定52・今回限り） */
+  CITIES_PER_REGION: 5,         /* 地域ごとの都市の数 */
+  SEA_P: 0.04,                  /* 海のところの土地生成確率 */
+  LAND_P: 0.92,                 /* 陸のところの土地生成確率 */
+  COAST_BLUR: 2.2,              /* 想定地形のふちのぼやけ（升） */
+
+  /* ── 探索（決定24・27・29・38・45・50・57） ── */
+  REACH: 46,                    /* 船の探索可能距離（升） */
+  SCAN_R: 2.4,                  /* 一歩ごとに土地を判定する半径（升） */
+  REVEAL_R: 11,                 /* 当たったとき黒が剥がれる半径（升・決定45） */
+  START_R: 9,                   /* 最初に見えている半径（決定53） */
+  EXPLORE_COST: 14,             /* 探索の費用／一升（決定27） */
+
+  /* ── 航路（決定33・34・69・71・73） ── */
+  OPEN_COST: 8,                /* 航路を開く一括／一升（決定34） */
+  KEEP_COST: 0.6,               /* 毎ターンの継続／一升（決定34） */
+  CUTS_PER_TURN: 99,            /* 一ターンに切れる本数（決定71） */
+  GROW_PER_TURN: 0.12,          /* 繋がっている一ターンごとに効果が伸びる量（決定73） */
+  GROW_CAP: 1.20,               /* 効果の伸びの頭打ち（決定73） */
+
+  /* ── 儲け（決定31・32・64） ── */
+  DIST_HALF: 40,                /* 距離係数 = 1 + 直線距離 ÷ これ（升） */
+  REGION_MUL: [1.0, 1.6, 2.4],  /* 地域倍率：同じ／隣／遠い */
+  RARE_R: 17,                   /* 希少倍率を数える半径（升・決定64） */
+  RARE_MUL: [2.0, 1.4, 1.0],    /* 同じ品が 0個／1個／2個以上 */
+
+  /* ── 金と締め切り（決定12・39・46・47） ── */
+  GOLD0: 1400,                  /* 初期資金 */
+  QUOTAS: [600, 2400],         /* 取り立ての額（二回・決定47） */
+  QUOTA_TURNS: [10, 22],         /* 何ターン目に来るか */
+
+  /* ── 見た目（決定30・75・tetsuki-pop.md） ── */
+  ZOOM_FAR: 0.52, ZOOM_NEAR: 1.0,
+  OUT: '#141b26', LW: 0.030,
+  FOG: 'rgba(9,16,28,.84)',
+  BOB_A: 0.5, BOB_HZ: 2.2,
+};
+
+const C = { sea:'#2fb2d8', sea2:'#2699c4', deep:'#1d7fa8', foam:'#eafcff',
+  sand:'#f7dc9a', sand2:'#dcb96c', grass:'#6ccf62', grass2:'#4aa848',
+  hull:'#e2703c', hull2:'#b04e24', deck:'#ffd98a', sail:'#fdfbf2',
+  mast:'#b07a44', flag:'#f2504c', win:'#6fe0f0',
+  wall:'#fff2d6', roof:'#f0714c', lane:'#ffd45c', cut:'#ff6b6b',
+  panel:'#fff8e8', ink:'#2a3038', sub:'#8a939e', warn:'#ffd9d9' };
+
+/* 特産品〔Claude の案・使い捨て・2-b で捨てる〕決定35（四段）
+   decisions.md 決定15 の但し書きに従い、これを根拠に他を決めない */
+const GOODS = [
+  { name:'岩塩',   rank:1, value:9,  eff:'太い型の航路 ＋30%',  kind:'other', n:0.30 },
+  { name:'羊毛',   rank:1, value:15, eff:'この品の航路 ×1.5',   kind:'fat',   n:0.50 },
+  { name:'亜麻',   rank:1, value:15, eff:'この品の航路 ×1.4',   kind:'fat',   n:0.40 },
+  { name:'星図',   rank:2, value:24,  eff:'探索の費用 −25%',     kind:'scout', n:0.25 },
+  { name:'黒檀',   rank:2, value:42, eff:'この品の航路 ×2.0',   kind:'fat',   n:1.00 },
+  { name:'龍涎香', rank:3, value:60, eff:'全部の航路 ＋15%',    kind:'other', n:0.15 },
+  { name:'丁子',   rank:4, value:90, eff:'岩塩と揃うと香油',    kind:'born',  n:0 },
+];
+
+/* ══════════════════════════════════════════════════════════════ */
+const CV=document.getElementById('c'); const g=CV.getContext('2d');
+let W=0,H=0,DPR=Math.min(2,devicePixelRatio||1);
+function fit(){ W=innerWidth; H=innerHeight; CV.width=W*DPR; CV.height=H*DPR;
+  g.setTransform(DPR,0,0,DPR,0,0); }
+addEventListener('resize',()=>{fit();});
+fit();
+
+/* 決まった種でぶれない乱数（決定50：計算は押した瞬間に終わる） */
+let seed=20260822;
+const R=()=>((seed=seed*16807%2147483647)-1)/2147483646;
+
+/* ── 想定地形を絵で描いて、その上を確率にする（決定51） ── */
+const P=new Float32Array(K.COLS*K.ROWS);       /* 土地の生まれやすさ */
+const ST=new Uint8Array(K.COLS*K.ROWS);        /* 0=未探索 1=確定海 2=確定陸 */
+const pi=(x,y)=>y*K.COLS+x;
+
+function drawIntendedLand(){
+  /* 想定地形＝三つの地域に大きな塊を置く。中央は小さめ（港がある） */
+  const blobs=[];
+  const cy=K.ROWS/2;
+  const centers=[[K.COLS*0.16,cy],[K.COLS*0.50,cy],[K.COLS*0.84,cy]];
+  centers.forEach(([bx,by],ri)=>{
+    const n = ri===1 ? 5 : 9;
+    for(let i=0;i<n;i++){
+      const a=R()*Math.PI*2, d=R()*(ri===1?9:17);
+      blobs.push({x:bx+Math.cos(a)*d, y:by+Math.sin(a)*d*0.72,
+                  r:(ri===1?4.5:7.5)+R()*6});
+    }
+  });
+  for(let y=0;y<K.ROWS;y++) for(let x=0;x<K.COLS;x++){
+    let best=-1e9;
+    for(const b of blobs){
+      const d=Math.hypot(x-b.x,y-b.y);
+      best=Math.max(best,b.r-d);            /* 陸の中で正、外で負 */
+    }
+    /* ふちをぼかして、海↔陸のあいだに中くらいの確率の帯を作る */
+    const t=Math.max(0,Math.min(1,(best+K.COAST_BLUR)/(K.COAST_BLUR*2)));
+    P[pi(x,y)]=K.SEA_P+(K.LAND_P-K.SEA_P)*t;
+  }
+}
+drawIntendedLand();
+
+/* ── 想定地形の上に地域を振り、地域ごとに都市を振る（決定36） ── */
+const regionOf=x=> x<K.COLS/3 ? 0 : x<K.COLS*2/3 ? 1 : 2;
+const regionGap=(a,b)=>Math.abs(a-b);        /* 0=同じ 1=隣 2=遠い */
+
+const CITIES=[];
+const NAMES=['ベルヌ','アズハル','サンティラ','モルガ','タリム','ヴェルデ','クサール',
+  'ラナ','ペトラ','オルシュ','ミラ','ゼノン','カディス','ソラナ','ハラン'];
+function placeCities(){
+  for(let r=0;r<K.REGIONS;r++){
+    let placed=0, guard=0;
+    while(placed<K.CITIES_PER_REGION && guard++<4000){
+      const x=Math.floor((r+R())*K.COLS/K.REGIONS);
+      const y=Math.floor(R()*K.ROWS);
+      if(x<2||y<2||x>K.COLS-3||y>K.ROWS-3) continue;
+      if(P[pi(x,y)]<0.55) continue;                       /* 想定で陸のところに置く */
+      if(CITIES.some(c=>Math.hypot(c.x-x,c.y-y)<9)) continue;
+      const good=GOODS[Math.floor(R()*GOODS.length)];
+      CITIES.push({x,y,region:r,good,name:NAMES[CITIES.length%NAMES.length],
+                   shown:false});
+      placed++;
+    }
+  }
+}
+placeCities();
+
+/* 港は中央の地域の都市を一つ（決定53） */
+const PORT=CITIES.filter(c=>c.region===1)[0];
+PORT.shown=true;
+
+/* ══ 状態 ══════════════════════════════════════════════════ */
+const S={
+  turn:1, gold:K.GOLD0, quotaIx:0,
+  pins:[],                 /* 探索の折れ線（港からの点） */
+  lanes:[],                /* {a,b,path,len,age} */
+  phase:'plan',            /* plan | result | over | clear */
+  result:null,             /* 直前の探索の結果 */
+  lastRun:null,            /* 引き直し用（同じピンで引き直す） */
+  zoom:K.ZOOM_NEAR, camX:0, camY:0,
+  msg:'', msgT:0, cutMode:false, cuts:0,
+};
+
+function revealCircle(cx,cy,r,forceSea){
+  for(let y=Math.max(0,cy-r|0);y<Math.min(K.ROWS,cy+r+1);y++)
+  for(let x=Math.max(0,cx-r|0);x<Math.min(K.COLS,cx+r+1);x++){
+    if(Math.hypot(x-cx,y-cy)>r) continue;
+    if(ST[pi(x,y)]) continue;
+    ST[pi(x,y)] = (!forceSea && R()<P[pi(x,y)]) ? 2 : 1;
+  }
+}
+revealCircle(PORT.x,PORT.y,K.START_R,false);
+ST[pi(PORT.x,PORT.y)]=2;
+
+/* ══ 探索：計算は押した瞬間に全部終わる（決定50） ══════════ */
+function polyPoints(pins){
+  const pts=[{x:PORT.x,y:PORT.y},...pins,{x:PORT.x,y:PORT.y}];
+  const out=[]; 
+  for(let i=0;i<pts.length-1;i++){
+    const a=pts[i],b=pts[i+1], d=Math.hypot(b.x-a.x,b.y-a.y), n=Math.max(1,Math.ceil(d*2));
+    for(let s=0;s<n;s++) out.push({x:a.x+(b.x-a.x)*s/n, y:a.y+(b.y-a.y)*s/n});
+  }
+  out.push({x:PORT.x,y:PORT.y});
+  return out;
+}
+function polyLen(pins){
+  const pts=[{x:PORT.x,y:PORT.y},...pins,{x:PORT.x,y:PORT.y}];
+  let L=0; for(let i=0;i<pts.length-1;i++) L+=Math.hypot(pts[i+1].x-pts[i].x,pts[i+1].y-pts[i].y);
+  return L;
+}
+function scoutMul(){                       /* 星図＝探検に効く（繋がっているときだけ・決定16） */
+  let m=1; for(const l of S.lanes){ for(const c of [l.a,l.b])
+    if(c.good.kind==='scout') m=Math.min(m,1-c.good.n); }
+  return m;
+}
+function exploreCost(len){ return Math.round(len*K.EXPLORE_COST*scoutMul()); }
+
+function runExplore(pins){
+  const pts=polyPoints(pins);
+  let ran=0, hit=null;
+  for(let i=1;i<pts.length;i++){
+    ran+=Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y);
+    const cx=Math.round(pts[i].x), cy=Math.round(pts[i].y);
+    let found=false;
+    for(let dy=-K.SCAN_R;dy<=K.SCAN_R&&!found;dy++)
+    for(let dx=-K.SCAN_R;dx<=K.SCAN_R&&!found;dx++){
+      const x=cx+Math.round(dx), y=cy+Math.round(dy);
+      if(x<0||y<0||x>=K.COLS||y>=K.ROWS) continue;
+      if(ST[pi(x,y)]) continue;
+      if(Math.hypot(dx,dy)>K.SCAN_R) continue;
+      if(R()<P[pi(x,y)]){ found=true; hit={x,y}; }
+    }
+    if(found) break;                        /* 見つけたら必ず引き返す（決定57） */
+  }
+  const cost=Math.round(ran*K.EXPLORE_COST*scoutMul());
+  return {pins:pins.map(p=>({...p})), ran, cost, hit, applied:false};
+}
+function applyResult(res){
+  if(res.hit) revealCircle(res.hit.x,res.hit.y,K.REVEAL_R,false);
+  else { const pts=polyPoints(res.pins);
+         pts.forEach(p=>revealCircle(Math.round(p.x),Math.round(p.y),K.SCAN_R,true)); }
+  const found=[];
+  CITIES.forEach(c=>{ if(!c.shown && ST[pi(c.x,c.y)]===2){ c.shown=true; found.push(c); } });
+  res.found=found; res.applied=true;
+}
+
+/* ══ 繋ぐ：開いた海だけを通る自動経路（決定33） ══════════ */
+function seaPath(a,b){
+  const q=[pi(a.x,a.y)], prev=new Int32Array(K.COLS*K.ROWS).fill(-1);
+  prev[pi(a.x,a.y)]=-2; const goal=pi(b.x,b.y);
+  const ok=i=>ST[i]===1 || i===goal;
+  for(let h=0;h<q.length;h++){
+    const cur=q[h]; if(cur===goal) break;
+    const x=cur%K.COLS, y=(cur/K.COLS)|0;
+    for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]){
+      const nx=x+dx, ny=y+dy; if(nx<0||ny<0||nx>=K.COLS||ny>=K.ROWS) continue;
+      const ni=pi(nx,ny); if(prev[ni]!==-1) continue; if(!ok(ni)) continue;
+      prev[ni]=cur; q.push(ni);
+    }
+  }
+  if(prev[goal]===-1) return null;
+  const path=[]; let c=goal;
+  while(c>=0){ path.push({x:c%K.COLS,y:(c/K.COLS)|0}); c=prev[c]; if(prev[c]===-2){path.push({x:a.x,y:a.y});break;} }
+  path.reverse();
+  let L=0; for(let i=1;i<path.length;i++) L+=Math.hypot(path[i].x-path[i-1].x,path[i].y-path[i-1].y);
+  return {path,len:L};
+}
+
+/* ══ 儲け（決定31・32・64・73） ══════════════════════════ */
+function rareMul(target,good){
+  let n=0;
+  CITIES.forEach(c=>{ if(c===target||!c.shown) return;
+    if(c.good.name===good.name && Math.hypot(c.x-target.x,c.y-target.y)<=K.RARE_R) n++; });
+  return K.RARE_MUL[Math.min(2,n)];
+}
+function effMul(lane,good){
+  let m=1;
+  const grow=1+Math.min(K.GROW_CAP,lane.age*K.GROW_PER_TURN);   /* 育つ（決定73） */
+  if(good.kind==='fat') m*=1+(good.n)*grow;
+  S.lanes.forEach(l=>{ for(const c of [l.a,l.b]){
+    if(c.good.kind!=='other') continue;
+    const og=1+Math.min(K.GROW_CAP,l.age*K.GROW_PER_TURN);
+    if(c.good.name==='龍涎香') m*=1+c.good.n*og;
+    if(c.good.name==='岩塩' && good.kind==='fat') m*=1+c.good.n*og;
+  }});
+  return m;
+}
+function laneIncome(l){
+  const straight=Math.hypot(l.a.x-l.b.x,l.a.y-l.b.y);
+  const dist=1+straight/K.DIST_HALF;
+  const reg=K.REGION_MUL[regionGap(l.a.region,l.b.region)];
+  const one=(from,to)=> from.good.value*dist*reg*rareMul(to,from.good)*effMul(l,from.good);
+  return one(l.a,l.b)+one(l.b,l.a) - l.len*K.KEEP_COST;
+}
+const totalIncome=()=>S.lanes.reduce((s,l)=>s+laneIncome(l),0);
+
+/* ══ 入力 ══════════════════════════════════════════════════ */
+function toCell(mx,my){
+  const s=K.CELL*S.zoom;
+  return {x:(mx-S.camX)/s, y:(my-S.camY)/s};
+}
+function cellToPx(x,y){ const s=K.CELL*S.zoom; return {x:x*s+S.camX, y:y*s+S.camY}; }
+function centerOn(cx,cy){ const s=K.CELL*S.zoom; S.camX=W/2-cx*s; S.camY=H/2-cy*s; }
+centerOn(PORT.x,PORT.y);
+
+let sel=null;   /* 繋ぐときに選んだ一つ目 */
+const BTN=[];   /* 当たり判定 {x,y,w,h,fn} */
+
+function say(t){ S.msg=t; S.msgT=performance.now(); }
+
+CV.addEventListener('click',e=>{
+  const mx=e.clientX,my=e.clientY;
+  for(let i=BTN.length-1;i>=0;i--){ const b=BTN[i];
+    if(mx>=b.x&&mx<=b.x+b.w&&my>=b.y&&my<=b.y+b.h){ b.fn(); return; } }
+  if(S.phase!=='plan') return;
+  const cell=toCell(mx,my);
+  const city=CITIES.find(c=>c.shown && Math.hypot(c.x-cell.x,c.y-cell.y)<1.6);
+
+  if(S.cutMode){
+    const l=S.lanes.find(l=>l.path.some(p=>Math.hypot(p.x-cell.x,p.y-cell.y)<1.2));
+    if(l){ S.lanes.splice(S.lanes.indexOf(l),1); S.cuts++;
+           say('航路を切った。育ちは消えた'); }
+    return;
+  }
+  if(city){                                  /* 繋ぐ（決定70：切るも同じ場所） */
+    if(!sel){ sel=city; say(city.name+' を選んだ。もう一つ選ぶ'); return; }
+    if(sel===city){ sel=null; return; }
+    if(S.lanes.some(l=>(l.a===sel&&l.b===city)||(l.a===city&&l.b===sel))){
+      say('もう繋がっている'); sel=null; return; }
+    const sp=seaPath(sel,city);
+    if(!sp){ say('海が繋がっていない。先に探索する'); sel=null; return; }
+    const cost=Math.round(sp.len*K.OPEN_COST);
+    if(cost>S.gold){ say('金が足りない（開く '+cost+'）'); sel=null; return; }
+    S.gold-=cost;
+    S.lanes.push({a:sel,b:city,path:sp.path,len:sp.len,age:0});
+    say('繋いだ（開く −'+cost+'）'); sel=null; return;
+  }
+  /* ピンを置く（決定38：本数の上限なし。長さだけで縛る） */
+  const trial=[...S.pins,{x:cell.x,y:cell.y}];
+  if(polyLen(trial)>K.REACH){ say('届かない（上限 '+K.REACH+'）'); return; }
+  S.pins=trial;
+});
+CV.addEventListener('contextmenu',e=>{ e.preventDefault(); S.pins.pop(); });
+addEventListener('keydown',e=>{
+  if(e.key==='z'){ S.zoom = S.zoom===K.ZOOM_FAR?K.ZOOM_NEAR:K.ZOOM_FAR; centerOn(PORT.x,PORT.y); }
+});
+let drag=null;
+CV.addEventListener('pointerdown',e=>{ drag={x:e.clientX,y:e.clientY,cx:S.camX,cy:S.camY,moved:0}; });
+CV.addEventListener('pointermove',e=>{ if(!drag||!e.buttons) return;
+  const dx=e.clientX-drag.x, dy=e.clientY-drag.y; drag.moved+=Math.abs(dx)+Math.abs(dy);
+  if(drag.moved>18){ S.camX=drag.cx+dx; S.camY=drag.cy+dy; } });
+CV.addEventListener('pointerup',()=>{ if(drag&&drag.moved>18) event.stopPropagation?.(); drag=null; });
+
+/* ══ ターンを進める ══════════════════════════════════════ */
+function goExplore(skip){
+  const res = skip ? {pins:[],ran:0,cost:0,hit:null} : runExplore(S.pins);
+  if(res.cost>S.gold){ say('探索の金が足りない（'+res.cost+'）'); return; }
+  S.gold-=res.cost;
+  applyResult(res);
+  S.result=res; S.lastRun=S.pins.map(p=>({...p}));
+  S.phase='result';
+}
+function reroll(){                            /* 決定61：走った分だけもう一度払う */
+  const res=runExplore(S.lastRun);
+  if(res.cost>S.gold){ say('引き直す金が足りない（'+res.cost+'）'); return; }
+  S.gold-=res.cost; applyResult(res); S.result=res;
+}
+function nextTurn(){                          /* 決定60：次に進むと確定 */
+  S.gold+=Math.round(totalIncome());          /* 決定67：金が動くのはここ */
+  S.lanes.forEach(l=>l.age++);
+  S.pins=[]; S.result=null; S.cuts=0; S.turn++; S.phase='plan';
+  /* 決定39：取り立てはターンの頭、収入が入った直後 */
+  if(S.quotaIx<K.QUOTAS.length && S.turn>K.QUOTA_TURNS[S.quotaIx]){
+    if(S.gold>=K.QUOTAS[S.quotaIx]){ S.gold-=K.QUOTAS[S.quotaIx]; S.quotaIx++;
+      if(S.quotaIx>=K.QUOTAS.length) S.phase='clear'; else say('取り立てを越えた'); }
+    else S.phase='over';
+  }
+}
+function restart(){ location.reload(); }
+
+/* ══ 描く（tetsuki-pop.md の手つき） ══════════════════════ */
+function el(x,y,rx,ry,fill,lw){ g.beginPath(); g.ellipse(x,y,rx,ry,0,0,7);
+  g.fillStyle=fill; g.fill(); if(lw){g.strokeStyle=K.OUT;g.lineWidth=lw;g.stroke();} }
+function plate(x,y,text,sub,bg){
+  g.font='700 13px system-ui,"Hiragino Kaku Gothic ProN",sans-serif';
+  let w=g.measureText(text).width;
+  if(sub){ g.font='11px system-ui,sans-serif'; w=Math.max(w,g.measureText(sub).width);
+           g.font='700 13px system-ui,"Hiragino Kaku Gothic ProN",sans-serif'; }
+  const pw=w+22, ph=sub?38:26;
+  g.beginPath(); g.roundRect(x-pw/2,y-ph/2,pw,ph,ph/2);
+  g.fillStyle=bg||C.panel; g.fill(); g.strokeStyle=K.OUT; g.lineWidth=2.4; g.stroke();
+  g.fillStyle=C.ink; g.textAlign='center'; g.textBaseline='middle';
+  g.fillText(text,x,y-(sub?7:0));
+  if(sub){ g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub; g.fillText(sub,x,y+9); }
+  return {x:x-pw/2,y:y-ph/2,w:pw,h:ph};
+}
+function button(x,y,w,h,label,color,fn,on){
+  g.beginPath(); g.roundRect(x,y,w,h,h/2);
+  g.fillStyle=on?color:'#5b6572'; g.fill();
+  g.strokeStyle=K.OUT; g.lineWidth=3; g.stroke();
+  g.beginPath(); g.roundRect(x+w*0.10,y+h*0.16,w*0.80,h*0.30,h*0.15);
+  g.fillStyle='rgba(255,255,255,.22)'; g.fill();
+  g.font='700 14px system-ui,"Hiragino Kaku Gothic ProN",sans-serif';
+  g.fillStyle='#fff'; g.textAlign='center'; g.textBaseline='middle';
+  g.fillText(label,x+w/2,y+h/2+1);
+  if(on) BTN.push({x,y,w,h,fn});
+}
+function ship(px,py,s,t){
+  const w=v=>v*s, bob=Math.sin(t*K.BOB_HZ)*s*K.BOB_A;
+  g.save(); g.translate(px,py+bob); g.lineJoin='round'; g.lineCap='round';
+  g.beginPath(); g.moveTo(w(-2),w(-31)); g.quadraticCurveTo(w(21),w(-27),w(16),w(-8));
+  g.quadraticCurveTo(w(6),w(-11),w(-2),w(-10)); g.closePath();
+  g.fillStyle=C.sail; g.fill(); g.strokeStyle=K.OUT; g.lineWidth=w(2.8); g.stroke();
+  g.beginPath(); g.moveTo(w(-2),w(-34)); g.lineTo(w(-2),w(-6));
+  g.strokeStyle=K.OUT; g.lineWidth=w(4.8); g.stroke();
+  g.strokeStyle=C.mast; g.lineWidth=w(2.8); g.stroke();
+  g.beginPath(); g.moveTo(w(-2),w(-36)); g.lineTo(w(9),w(-32.5)); g.lineTo(w(-2),w(-29));
+  g.closePath(); g.fillStyle=C.flag; g.fill(); g.strokeStyle=K.OUT; g.lineWidth=w(2.2); g.stroke();
+  g.beginPath(); g.moveTo(w(-27),w(-8)); g.lineTo(w(27),w(-8));
+  g.quadraticCurveTo(w(28),w(3),w(19),w(9));
+  g.quadraticCurveTo(w(2),w(13),w(-16),w(9));
+  g.quadraticCurveTo(w(-27),w(4),w(-27),w(-8)); g.closePath();
+  g.fillStyle=C.hull; g.fill();
+  g.save(); g.clip();
+  g.fillStyle=C.hull2; g.fillRect(w(-32),w(2),w(66),w(20));
+  g.fillStyle=C.deck;  g.fillRect(w(-32),w(-8),w(66),w(4.2));
+  g.restore();
+  g.strokeStyle=K.OUT; g.lineWidth=w(3.6); g.stroke();
+  [[-12,1.7],[0,2.2],[12,1.7]].forEach(([x,r])=>{
+    el(w(x),w(2),w(r+1),w(r+1),K.OUT,0); el(w(x),w(1.7),w(r),w(r),C.win,0); });
+  g.restore();
+}
+
+let fogC=null, seaC=document.createElement('canvas'), seaC2=document.createElement('canvas'),
+    landC=document.createElement('canvas'), landC2=document.createElement('canvas');
+function draw(t){
+  BTN.length=0;
+  const s=K.CELL*S.zoom;
+  g.fillStyle='#0e1420'; g.fillRect(0,0,W,H);
+
+  /* 海と陸 ── 升目ではなく、丸を重ねた塊として描く（tetsuki-pop.md） */
+  const x0=Math.max(0,Math.floor(-S.camX/s)-2), x1=Math.min(K.COLS,Math.ceil((W-S.camX)/s)+2);
+  const y0=Math.max(0,Math.floor(-S.camY/s)-2), y1=Math.min(K.ROWS,Math.ceil((H-S.camY)/s)+2);
+  const lay=(cv)=>{ if(cv.width!==CV.width){cv.width=CV.width;cv.height=CV.height;}
+    const c=cv.getContext('2d'); c.setTransform(DPR,0,0,DPR,0,0); c.clearRect(0,0,W,H); return c; };
+  const disc=(c,pred,r)=>{ c.fillStyle='#fff'; c.beginPath();
+    for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){ if(!pred(x,y)) continue;
+      const q=cellToPx(x+.5,y+.5); c.moveTo(q.x+r,q.y); c.arc(q.x,q.y,r,0,7); }
+    c.fill(); };
+  const tint=(cv,color)=>{ const c=cv.getContext('2d');
+    c.globalCompositeOperation='source-in'; c.fillStyle=color; c.fillRect(0,0,W,H);
+    c.globalCompositeOperation='source-over'; };
+  const known=(x,y)=>ST[pi(x,y)]!==0, isLand=(x,y)=>ST[pi(x,y)]===2;
+
+  /* 海 */
+  disc(lay(seaC),known,s*1.20); tint(seaC,C.sea); g.drawImage(seaC,0,0,W,H);
+  g.save(); g.globalAlpha=.55;
+  disc(lay(seaC2),(x,y)=>known(x,y)&&(y%6<3),s*1.20); tint(seaC2,C.sea2);
+  g.drawImage(seaC2,0,0,W,H); g.restore();
+
+  /* 陸：暗い輪郭 → 砂 → 草 → 照り */
+  const ow=Math.max(2,s*0.20);
+  disc(lay(landC),isLand,s*1.02); tint(landC,K.OUT);
+  for(let a2=0;a2<8;a2++) g.drawImage(landC,Math.cos(a2*0.785)*ow,Math.sin(a2*0.785)*ow,W,H);
+  disc(lay(landC),isLand,s*1.02); tint(landC,C.sand); g.drawImage(landC,0,0,W,H);
+  disc(lay(landC2),isLand,s*0.80); tint(landC2,C.grass); g.drawImage(landC2,0,0,W,H);
+  disc(lay(landC2),isLand,s*0.66); tint(landC2,'rgba(255,255,255,.18)');
+  g.drawImage(landC2,0,-s*0.24,W,H);
+
+  /* 霧（未探索）── 別紙に描いて destination-out で抜く */
+  if(!fogC) fogC=document.createElement('canvas');
+  if(fogC.width!==CV.width){ fogC.width=CV.width; fogC.height=CV.height; }
+  const fg=fogC.getContext('2d'); fg.setTransform(DPR,0,0,DPR,0,0);
+  fg.clearRect(0,0,W,H); fg.globalCompositeOperation='source-over';
+  fg.fillStyle=K.FOG; fg.fillRect(0,0,W,H);
+  fg.globalCompositeOperation='destination-out';
+  fg.fillStyle='#000'; fg.beginPath();
+  for(let y=y0;y<y1;y++) for(let x=x0;x<x1;x++){ if(!ST[pi(x,y)]) continue;
+    const q=cellToPx(x+.5,y+.5); fg.moveTo(q.x+s*1.02,q.y); fg.arc(q.x,q.y,s*1.02,0,7); }
+  fg.fill();
+  fg.globalCompositeOperation='source-over';
+  g.drawImage(fogC,0,0,W,H);
+
+  /* 航路 */
+  S.lanes.forEach(l=>{
+    g.beginPath();
+    l.path.forEach((p,i)=>{ const q=cellToPx(p.x+.5,p.y+.5);
+      i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y); });
+    g.strokeStyle=K.OUT; g.lineWidth=7; g.stroke();
+    g.strokeStyle=S.cutMode?C.cut:C.lane; g.lineWidth=4; g.stroke();
+    const mid=l.path[(l.path.length/2)|0]; const q=cellToPx(mid.x,mid.y);
+    g.font='700 11px system-ui,sans-serif'; g.fillStyle='#fff'; g.textAlign='center';
+    g.fillText('+'+Math.round(laneIncome(l))+'  '+l.age+'年', q.x, q.y-9);
+  });
+
+  /* 探索の線 */
+  if(S.phase==='plan' && S.pins.length){
+    const pts=[{x:PORT.x,y:PORT.y},...S.pins,{x:PORT.x,y:PORT.y}];
+    g.beginPath(); pts.forEach((p,i)=>{ const q=cellToPx(p.x,p.y);
+      i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y); });
+    g.strokeStyle=K.OUT; g.lineWidth=6; g.setLineDash([10,7]); g.stroke();
+    g.strokeStyle='#ffe27a'; g.lineWidth=3; g.stroke(); g.setLineDash([]);
+    S.pins.forEach(p=>{ const q=cellToPx(p.x,p.y); el(q.x,q.y,6,6,'#ffe27a',2.5); });
+  }
+
+  /* 都市 */
+  CITIES.forEach(c=>{
+    if(!c.shown) return;
+    const q=cellToPx(c.x+.5,c.y+.5);
+    if(q.x<-90||q.x>W+90||q.y<-70||q.y>H+70) return;
+    const r=c===PORT?9:7;
+    el(q.x,q.y+r*0.9,r*1.1,r*0.4,'rgba(8,34,52,.30)',0);
+    g.beginPath(); g.moveTo(q.x-r,q.y+r); g.lineTo(q.x-r,q.y-r*0.2);
+    g.lineTo(q.x,q.y-r*1.1); g.lineTo(q.x+r,q.y-r*0.2); g.lineTo(q.x+r,q.y+r);
+    g.closePath(); g.fillStyle=c===PORT?'#ffe9a8':C.wall; g.fill();
+    g.strokeStyle=K.OUT; g.lineWidth=2.6; g.stroke();
+    g.beginPath(); g.moveTo(q.x-r-1.5,q.y-r*0.2); g.lineTo(q.x,q.y-r*1.35);
+    g.lineTo(q.x+r+1.5,q.y-r*0.2); g.closePath();
+    g.fillStyle=C.roof; g.fill(); g.strokeStyle=K.OUT; g.lineWidth=2.6; g.stroke();
+    if(sel===c) el(q.x,q.y,r*2.1,r*2.1,'rgba(255,226,122,.28)',3);
+    if(S.zoom>0.7||c===PORT) plate(q.x,q.y+r*3.2,c.name,c.good.name+'・'+c.good.eff);
+  });
+
+  /* 船は港に置く */
+  { const q=cellToPx(PORT.x+.5,PORT.y+.5); ship(q.x,q.y-26,0.55*S.zoom+0.25,t); }
+
+  /* ── 上の帯（決定19：残りターン・取り立て・所持金は常に見える） ── */
+  g.fillStyle='rgba(14,20,32,.86)'; g.fillRect(0,0,W,52);
+  g.strokeStyle='#222b3a'; g.lineWidth=1; g.beginPath(); g.moveTo(0,52); g.lineTo(W,52); g.stroke();
+  g.textAlign='left'; g.textBaseline='middle';
+  g.font='700 20px system-ui,sans-serif'; g.fillStyle='#ffe9a8';
+  g.fillText(S.gold.toLocaleString(), 18, 26);
+  g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub; g.fillText('所持', 18, 44);
+  const q=K.QUOTAS[Math.min(S.quotaIx,K.QUOTAS.length-1)];
+  const qt=K.QUOTA_TURNS[Math.min(S.quotaIx,K.QUOTAS.length-1)];
+  g.font='700 18px system-ui,sans-serif'; g.fillStyle=(S.gold<q)?'#ffb3b3':'#bdf5c0';
+  g.fillText(q.toLocaleString(), 140, 26);
+  g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub;
+  g.fillText('取り立て'+(S.quotaIx+1)+'／'+K.QUOTAS.length+'　あと '+Math.max(0,qt-S.turn+1)+' ターン', 140, 44);
+  g.font='700 16px system-ui,sans-serif'; g.fillStyle='#cfe6ff';
+  g.fillText('+'+Math.round(totalIncome()), 330, 26);
+  g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub;
+  g.fillText('今ターンの見込み', 330, 44);
+  g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub;
+  g.fillText('ターン '+S.turn+'　／　z＝引きと寄り　／　右クリックでピンを戻す', 470, 20);
+  if(S.phase==='plan'){
+    const len=polyLen(S.pins);
+    g.fillStyle=len>0?'#ffe27a':C.sub;
+    g.fillText('探索：長さ '+len.toFixed(1)+' ／ '+K.REACH+'　見込みの費用 '+exploreCost(len), 470, 40);
+  }
+
+  /* ── 下のボタン ── */
+  const by=H-74;
+  if(S.phase==='plan'){
+    button(W/2-250,by,110,44, S.cutMode?'切る中':'切る', '#e2703c', ()=>{S.cutMode=!S.cutMode;sel=null;}, true);
+    button(W/2-130,by,150,44,'探索に出す','#f0a33c',()=>goExplore(false), S.pins.length>0);
+    button(W/2+30,by,110,44,'スキップ','#6b7686',()=>goExplore(true), true);
+    button(W/2+150,by,100,44,'ピン消す','#5b6572',()=>{S.pins=[];}, S.pins.length>0);
+  }
+  if(S.phase==='result'){
+    const r=S.result;
+    g.fillStyle='rgba(9,16,28,.72)'; g.fillRect(0,52,W,H-52);
+    const bw=520,bh=230,bx=W/2-bw/2,byy=H/2-bh/2;
+    g.beginPath(); g.roundRect(bx,byy,bw,bh,18); g.fillStyle='#182236'; g.fill();
+    g.strokeStyle=K.OUT; g.lineWidth=3; g.stroke();
+    g.textAlign='left'; g.fillStyle='#eef1f5'; g.font='700 17px system-ui,sans-serif';
+    g.fillText(r.hit?'大地を見つけた':'何も見つからなかった', bx+26, byy+34);
+    g.font='12px system-ui,sans-serif'; g.fillStyle=C.sub;
+    g.fillText('走った長さ '+r.ran.toFixed(1)+'　払った '+r.cost, bx+26, byy+58);
+    let ly=byy+88;
+    (r.found||[]).forEach(c=>{
+      g.font='700 14px system-ui,sans-serif'; g.fillStyle='#ffe9a8';
+      g.fillText(c.name, bx+26, ly);
+      g.font='12px system-ui,sans-serif'; g.fillStyle='#cfe6ff';
+      g.fillText(c.good.name+'（'+['','常','珍','稀','極'][c.good.rank]+'）　'+c.good.eff, bx+110, ly);
+      ly+=24;
+    });
+    if(!(r.found||[]).length){ g.font='12px system-ui,sans-serif'; g.fillStyle=C.sub;
+      g.fillText('都市は出なかった', bx+26, ly); }
+    button(bx+26, byy+bh-58, 200, 42, '引き直す（−'+r.cost+'）', '#8a6fe0', reroll, S.gold>=r.cost);
+    button(bx+bw-186, byy+bh-58, 160, 42, '進む', '#4fb8e8', ()=>{ S.phase='plan'; nextTurn(); }, true);
+    g.textAlign='center'; g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub;
+    g.fillText('進むと確定する', bx+bw/2, byy+bh-14);
+  }
+  if(S.phase==='over'||S.phase==='clear'){
+    g.fillStyle='rgba(9,16,28,.88)'; g.fillRect(0,0,W,H);
+    g.textAlign='center'; g.fillStyle='#eef1f5'; g.font='700 30px system-ui,sans-serif';
+    g.fillText(S.phase==='clear'?'ステージクリア':'取り立てに届かなかった', W/2, H/2-70);
+    g.font='700 54px system-ui,sans-serif'; g.fillStyle='#ffe9a8';
+    g.fillText(S.gold.toLocaleString(), W/2, H/2);
+    g.font='12px system-ui,sans-serif'; g.fillStyle=C.sub;
+    g.fillText('スコア＝所持金', W/2, H/2+28);
+    button(W/2-170,H/2+60,160,46,'もう一回','#f0a33c',restart,true);
+    button(W/2+10,H/2+60,160,46,'終了','#5b6572',()=>{},true);
+  }
+
+  /* 言づて */
+  if(S.msg && performance.now()-S.msgT<2600){
+    g.textAlign='center'; g.font='700 14px system-ui,sans-serif';
+    const w=g.measureText(S.msg).width+28;
+    g.beginPath(); g.roundRect(W/2-w/2,H-140,w,32,16);
+    g.fillStyle='rgba(20,27,38,.92)'; g.fill();
+    g.strokeStyle='#3a4557'; g.lineWidth=2; g.stroke();
+    g.fillStyle='#eef1f5'; g.textBaseline='middle'; g.fillText(S.msg,W/2,H-124);
+  }
+}
+let t0=null;
+function loop(ts){ if(t0===null)t0=ts; draw((ts-t0)/1000); requestAnimationFrame(loop); }
+requestAnimationFrame(loop);
+</script>
