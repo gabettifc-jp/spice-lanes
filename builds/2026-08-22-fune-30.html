@@ -1,0 +1,350 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spice-lanes 見本4 ── 船を30通り</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#101216;color:#e8e8e8;
+     font:14px/1.6 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+header{padding:16px 20px;border-bottom:1px solid #262a32}
+h1{margin:0 0 4px;font-size:15px;letter-spacing:.04em}
+header p{margin:0;font-size:12px;color:#98a1b0}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(196px,1fr));gap:12px;padding:16px 20px 24px}
+figure{margin:0;border:1px solid #262a32;border-radius:4px;overflow:hidden;background:#0b0d11}
+figure svg{display:block;width:100%;height:auto}
+figcaption{padding:7px 9px 9px;font-size:11.5px;border-top:1px solid #262a32}
+.num{display:inline-block;min-width:1.7em;font-weight:700;color:#fff}
+footer{padding:0 20px 26px;font-size:12px;color:#79828f;max-width:72ch}
+b{color:#e8e8e8}
+</style>
+
+<header>
+  <h1>spice-lanes 見本4 ── 船を30通り</h1>
+  <p>同じ船を、質感だけ30通りで描いた。全部 HTML と SVG。<b>番号で返して。</b></p>
+</header>
+<div class="grid" id="grid"></div>
+<footer>
+  <b>21番だけ、わざとドット絵にしてある。</b>「ドットじゃないほうがいい」と言われたので、
+  何がドット絵で、何がそうでないかを、隣に並べて確かめられるようにした。<br><br>
+  近いものが在れば番号で。「7の色で14の作り」みたいな混ぜ方でもいい。
+</footer>
+
+<script>
+const W=200,H=170;
+/* ── 船の形（30枚とも同じ） ───────────────────────── */
+const HULL='M 24 108 L 176 108 C 168 130, 144 138, 100 138 C 56 138, 32 130, 24 108 Z';
+const DECK='M 30 108 L 170 108 L 166 100 L 34 100 Z';
+const BOW ='M 172 104 L 196 90';
+const MASTS=[[62,100,34],[100,100,20],[138,100,40]];
+const SAILS=[
+ 'M 44 44 C 62 38, 78 40, 80 44 L 80 76 C 66 82, 50 80, 44 76 Z',
+ 'M 82 30 C 102 24, 118 27, 120 31 L 120 70 C 104 76, 88 74, 82 70 Z',
+ 'M 122 48 C 140 42, 154 45, 156 49 L 156 78 C 142 84, 128 82, 122 78 Z'];
+const FLAG='M 100 20 L 130 26 L 100 32 Z';
+const SEA ='M 0 132 C 34 124, 62 140, 100 134 C 138 128, 166 142, 200 132 L 200 170 L 0 170 Z';
+
+function ship(o){
+  const {hull,sail,mast,line,lw=1.4,sailStroke,extra='',flag}=o;
+  return `
+  ${MASTS.map(([x,y,t])=>`<line x1="${x}" y1="${y}" x2="${x}" y2="${t}" stroke="${mast}" stroke-width="${lw*1.9}" stroke-linecap="round"/>`).join('')}
+  <line x1="24" y1="46" x2="176" y2="60" stroke="${mast}" stroke-width="${lw*.6}" opacity=".7"/>
+  ${SAILS.map(s=>`<path d="${s}" fill="${sail}" stroke="${sailStroke||line}" stroke-width="${lw}" stroke-linejoin="round"/>`).join('')}
+  <path d="${FLAG}" fill="${flag||line}" stroke="none"/>
+  <path d="${BOW}" stroke="${mast}" stroke-width="${lw*1.6}" stroke-linecap="round" fill="none"/>
+  <path d="${DECK}" fill="${hull}" stroke="${line}" stroke-width="${lw}"/>
+  <path d="${HULL}" fill="${hull}" stroke="${line}" stroke-width="${lw*1.15}" stroke-linejoin="round"/>
+  ${extra}`;
+}
+const T=(u,f,o,s)=>`<filter id="${u}" x="-15%" y="-15%" width="140%" height="140%">
+  <feTurbulence type="fractalNoise" baseFrequency="${f}" numOctaves="${o}" seed="${s}"/>
+  <feColorMatrix type="saturate" values="0"/></filter>`;
+const WOB=(u,f,sc,sd)=>`<filter id="${u}">
+  <feTurbulence type="fractalNoise" baseFrequency="${f}" numOctaves="3" seed="${sd}" result="n"/>
+  <feDisplacementMap in="SourceGraphic" in2="n" scale="${sc}" xChannelSelector="R" yChannelSelector="G"/></filter>`;
+const bg=c=>`<rect width="${W}" height="${H}" fill="${c}"/>`;
+const sea=(c,op=1)=>`<path d="${SEA}" fill="${c}" opacity="${op}"/>`;
+
+const S=[
+{n:'木版画（浮世絵）',b:u=>`<defs><pattern id="${u}w" width="24" height="13" patternUnits="userSpaceOnUse">
+  <path d="M0 11 q6 -9 12 0 t12 0" fill="none" stroke="#e8f0f4" stroke-width="1.2"/></pattern></defs>
+ ${bg('#4d8ab0')}<rect width="${W}" height="${H}" fill="url(#${u}w)" opacity=".5"/>
+ ${ship({hull:'#d8c48a',sail:'#f4efe2',mast:'#2e2a22',line:'#2e2a22',lw:2.2,flag:'#b4322a'})}
+ ${sea('#20364a',.9)}<path d="${SEA}" fill="url(#${u}w)" opacity=".35"/>`},
+
+{n:'銅版画',b:u=>`<defs><pattern id="${u}h" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(24)">
+  <line x1="0" y1="0" x2="0" y2="4" stroke="#1c2026" stroke-width=".4"/></pattern>${WOB(u+'w',.05,2.5,4)}</defs>
+ ${bg('#efe9dc')}<g filter="url(#${u}w)">
+ ${ship({hull:`url(#${u}h)`,sail:'#efe9dc',mast:'#1c2026',line:'#1c2026',lw:1,flag:'#1c2026'})}</g>
+ <path d="${SEA}" fill="url(#${u}h)" opacity=".8"/>`},
+
+{n:'水墨',b:u=>`<defs><filter id="${u}e"><feTurbulence type="fractalNoise" baseFrequency=".05" numOctaves="4" seed="6" result="n"/>
+  <feDisplacementMap in="SourceGraphic" in2="n" scale="9" xChannelSelector="R" yChannelSelector="G"/><feGaussianBlur stdDeviation=".9"/></filter></defs>
+ ${bg('#f6f3ea')}<g filter="url(#${u}e)" opacity=".85">
+ ${ship({hull:'#2b2b2b',sail:'#f6f3ea',mast:'#1c1c1c',line:'#1c1c1c',lw:1.8})}
+ <path d="${SEA}" fill="#2b2b2b" opacity=".22"/></g>`},
+
+{n:'水彩',b:u=>`<defs><filter id="${u}e"><feTurbulence type="fractalNoise" baseFrequency=".055" numOctaves="4" seed="3" result="n"/>
+  <feDisplacementMap in="SourceGraphic" in2="n" scale="8" xChannelSelector="R" yChannelSelector="G"/><feGaussianBlur stdDeviation=".8"/></filter>
+  ${T(u+'g',.7,3,2)}</defs>
+ ${bg('#f4efe2')}<g filter="url(#${u}e)">
+  <g opacity=".5" transform="translate(-3,-2)">${ship({hull:'#c8a06a',sail:'#cfe0e8',mast:'#8a7f52',line:'#8a7f52',lw:2})}</g>
+  <g opacity=".65">${ship({hull:'#d9b98a',sail:'#eef4f6',mast:'#7a6a44',line:'#7a6a44',lw:1.6})}</g>
+  <path d="${SEA}" fill="#a8c8d8" opacity=".55"/></g>
+ <rect width="${W}" height="${H}" filter="url(#${u}g)" opacity=".12" style="mix-blend-mode:multiply"/>`},
+
+{n:'油彩（厚塗り）',b:u=>`<defs><filter id="${u}p" x="-10%" y="-10%" width="130%" height="130%">
+  <feTurbulence type="fractalNoise" baseFrequency=".03 .13" numOctaves="4" seed="12" result="n"/>
+  <feDisplacementMap in="SourceGraphic" in2="n" scale="6" xChannelSelector="R" yChannelSelector="G"/></filter>
+  <linearGradient id="${u}s" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#e8c98a"/><stop offset="1" stop-color="#3f6f86"/></linearGradient></defs>
+ <rect width="${W}" height="${H}" fill="url(#${u}s)"/>
+ <g filter="url(#${u}p)">${ship({hull:'#7a4a22',sail:'#f6e9c8',mast:'#3a2612',line:'#3a2612',lw:1.6,flag:'#c0402c'})}
+ <path d="${SEA}" fill="#1d3b52" opacity=".92"/></g>`},
+
+{n:'古地図の余白',b:u=>`<defs>${T(u+'g',.85,4,7)}${WOB(u+'w',.04,3.5,9)}</defs>
+ ${bg('#e6d3ab')}<g filter="url(#${u}w)">
+ ${ship({hull:'#cbb489',sail:'#efe4c8',mast:'#5c3a1c',line:'#5c3a1c',lw:1.2,flag:'#9c1f21'})}
+ <g stroke="#5c3a1c" stroke-width=".5" fill="none" opacity=".6">
+  <path d="M 10 140 q 12 -6 24 0 t 24 0"/><path d="M 120 148 q 12 -6 24 0 t 24 0"/></g></g>
+ <rect width="${W}" height="${H}" filter="url(#${u}g)" opacity=".2" style="mix-blend-mode:multiply"/>`},
+
+{n:'ステンドグラス',b:u=>`<defs><linearGradient id="${u}a" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" stop-color="#1b6fa8"/><stop offset="1" stop-color="#0d2f4d"/></linearGradient>
+  <filter id="${u}g" x="-40%" y="-40%" width="180%" height="180%"><feGaussianBlur stdDeviation="2.4" result="b"/>
+  <feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+ <rect width="${W}" height="${H}" fill="url(#${u}a)"/>
+ <g stroke="#08080a" stroke-width="2.6" opacity=".85">
+  ${Array.from({length:6},(_,i)=>`<line x1="${i*40}" y1="0" x2="${i*40-18}" y2="${H}"/>`).join('')}</g>
+ <g filter="url(#${u}g)">${ship({hull:'#d8a12c',sail:'#f2e3a8',mast:'#08080a',line:'#08080a',lw:3.4,flag:'#e0483a'})}</g>
+ <path d="${SEA}" fill="#06203a" stroke="#08080a" stroke-width="3"/>`},
+
+{n:'刺繍・タペストリー',b:u=>`<defs>${T(u+'g',1.4,2,5)}
+ <pattern id="${u}c" width="4" height="4" patternUnits="userSpaceOnUse"><rect width="4" height="4" fill="#2c3f52"/>
+  <rect width="2" height="2" fill="#35495e"/><rect x="2" y="2" width="2" height="2" fill="#35495e"/></pattern>
+ <pattern id="${u}s" width="6" height="6" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+  <line x1="0" y1="0" x2="0" y2="4" stroke="#c8a05a" stroke-width="2.4" stroke-linecap="round"/></pattern></defs>
+ <rect width="${W}" height="${H}" fill="url(#${u}c)"/>
+ ${ship({hull:`url(#${u}s)`,sail:'#e8dcc0',mast:'#e2c98e',line:'#e2c98e',lw:2,flag:'#b8442f'})}
+ <path d="${SEA}" fill="#1a2836" stroke="#8fa8b8" stroke-width="1.6" stroke-dasharray="4 3"/>
+ <rect width="${W}" height="${H}" filter="url(#${u}g)" opacity=".22" style="mix-blend-mode:overlay"/>`},
+
+{n:'モザイク',b:u=>{const t=[];for(let y=0;y<H;y+=9)for(let x=0;x<W;x+=9)
+  t.push(`<rect x="${x+.6}" y="${y+.6}" width="7.8" height="7.8" rx=".8"/>`);
+ return `<defs><clipPath id="${u}h"><path d="${HULL}"/><path d="${DECK}"/></clipPath>
+  <clipPath id="${u}s">${SAILS.map(s=>`<path d="${s}"/>`).join('')}</clipPath>
+  <clipPath id="${u}w"><path d="${SEA}"/></clipPath></defs>
+ ${bg('#0f2a3a')}<g fill="#1d5476">${t.join('')}</g>
+ <g clip-path="url(#${u}w)" fill="#2a6d93">${t.join('')}</g>
+ <g clip-path="url(#${u}s)" fill="#e8e0c8">${t.join('')}</g>
+ <g clip-path="url(#${u}h)" fill="#c8a860">${t.join('')}</g>
+ ${MASTS.map(([x,y,tp])=>`<line x1="${x}" y1="${y}" x2="${x}" y2="${tp}" stroke="#3a2a18" stroke-width="2.6"/>`).join('')}`}},
+
+{n:'影絵（夕陽）',b:u=>`<defs><radialGradient id="${u}s" cx=".5" cy=".62" r=".72">
+  <stop offset="0" stop-color="#ffd98a"/><stop offset=".45" stop-color="#f08a3c"/><stop offset="1" stop-color="#6b2a4a"/></radialGradient></defs>
+ <rect width="${W}" height="${H}" fill="url(#${u}s)"/>
+ <circle cx="100" cy="118" r="42" fill="#fff0b8" opacity=".55"/>
+ <g>${ship({hull:'#1a0f18',sail:'#1a0f18',mast:'#1a0f18',line:'#1a0f18',lw:1,flag:'#1a0f18'})}</g>
+ <path d="${SEA}" fill="#3a1330" opacity=".85"/>
+ <g stroke="#ffd07a" stroke-width="1.2" opacity=".55">
+  ${Array.from({length:7},(_,i)=>`<line x1="${70+i*10}" y1="${140+i*4}" x2="${130-i*8}" y2="${140+i*4}"/>`).join('')}</g>`},
+
+{n:'ネオン',b:u=>`<defs><filter id="${u}n" x="-60%" y="-60%" width="220%" height="220%">
+  <feGaussianBlur stdDeviation="3.4" result="b1"/><feGaussianBlur in="SourceGraphic" stdDeviation="8" result="b2"/>
+  <feMerge><feMergeNode in="b2"/><feMergeNode in="b1"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+ ${bg('#04070d')}
+ <g filter="url(#${u}n)">${ship({hull:'none',sail:'none',mast:'#2ce8c8',line:'#2ce8c8',lw:1.6,flag:'#ff4fa3',sailStroke:'#ff4fa3'})}
+ <path d="${SEA}" fill="none" stroke="#4f8fff" stroke-width="1.6"/></g>`},
+
+{n:'ブループリント',b:u=>`<defs><pattern id="${u}g" width="14" height="14" patternUnits="userSpaceOnUse">
+  <path d="M14 0 L0 0 0 14" fill="none" stroke="#7fb6e0" stroke-width=".3" opacity=".5"/></pattern></defs>
+ ${bg('#0e3b63')}<rect width="${W}" height="${H}" fill="url(#${u}g)"/>
+ ${ship({hull:'none',sail:'none',mast:'#dcefff',line:'#dcefff',lw:1.1})}
+ <g stroke="#8fc4e8" stroke-width=".45" opacity=".85">
+  <line x1="24" y1="152" x2="196" y2="152"/><path d="M24 152 l5 -3 v6 z M196 152 l-5 -3 v6 z" fill="#8fc4e8" stroke="none"/></g>
+ <text x="100" y="164" font-size="7" fill="#cfe6f8" text-anchor="middle" font-family="ui-monospace,monospace">172</text>`},
+
+{n:'レトロ印刷（網点）',b:u=>`<defs><pattern id="${u}d" width="4" height="4" patternUnits="userSpaceOnUse">
+  <circle cx="2" cy="2" r="1.35" fill="#d94f3d"/></pattern>
+ <pattern id="${u}d2" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)">
+  <circle cx="2" cy="2" r="1.2" fill="#2f6f9e"/></pattern>${T(u+'g',.9,2,1)}</defs>
+ ${bg('#f3efe4')}<rect width="${W}" height="${H}" fill="url(#${u}d2)" opacity=".45"/>
+ <g transform="translate(3,2)">${ship({hull:`url(#${u}d)`,sail:`url(#${u}d)`,mast:'#d94f3d',line:'none',lw:0})}</g>
+ ${ship({hull:'none',sail:'none',mast:'#22303a',line:'#22303a',lw:1.1})}
+ <path d="${SEA}" fill="url(#${u}d2)" opacity=".8"/>
+ <rect width="${W}" height="${H}" filter="url(#${u}g)" opacity=".14" style="mix-blend-mode:multiply"/>`},
+
+{n:'切り絵（紙の重なり）',b:u=>`<defs><filter id="${u}s"><feDropShadow dx="1.5" dy="2.5" stdDeviation="1.4" flood-color="#2a2018" flood-opacity=".45"/></filter></defs>
+ ${bg('#f0e6d2')}
+ <g filter="url(#${u}s)"><path d="${SEA}" fill="#7fa8b8" transform="translate(0,-12)"/></g>
+ <g filter="url(#${u}s)">${ship({hull:'#c86a3c',sail:'#faf4e6',mast:'#6b4a2a',line:'none',lw:0})}</g>
+ <g filter="url(#${u}s)"><path d="${SEA}" fill="#4d7f92"/></g>
+ <g filter="url(#${u}s)"><path d="${SEA}" fill="#2f5f74" transform="translate(0,14)"/></g>`},
+
+{n:'染付（青と白の陶器）',b:u=>`<defs>${T(u+'g',.9,3,8)}
+ <filter id="${u}b"><feGaussianBlur stdDeviation=".6"/></filter></defs>
+ ${bg('#f2f0e6')}
+ <g filter="url(#${u}b)">${ship({hull:'#2f5aa8',sail:'#f2f0e6',mast:'#20407a',line:'#20407a',lw:1.5,flag:'#20407a'})}
+ <path d="${SEA}" fill="none" stroke="#2f5aa8" stroke-width="2"/>
+ <path d="${SEA}" fill="#2f5aa8" opacity=".22"/></g>
+ <g stroke="#2f5aa8" stroke-width="1" fill="none" opacity=".55">
+  <circle cx="100" cy="85" r="86"/></g>
+ <rect width="${W}" height="${H}" filter="url(#${u}g)" opacity=".1" style="mix-blend-mode:multiply"/>`},
+
+{n:'金彩・漆',b:u=>`<defs><linearGradient id="${u}g" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" stop-color="#f6dd8e"/><stop offset=".4" stop-color="#c99a2e"/>
+  <stop offset=".62" stop-color="#f8e9a6"/><stop offset="1" stop-color="#8a6412"/></linearGradient>
+ ${T(u+'n',1.1,2,4)}</defs>
+ ${bg('#140d0a')}
+ ${ship({hull:`url(#${u}g)`,sail:`url(#${u}g)`,mast:'#f0d78a',line:'#3a2a10',lw:1,flag:`url(#${u}g)`})}
+ <path d="${SEA}" fill="#1e120c" stroke="#c99a2e" stroke-width="1.2"/>
+ <g fill="#f6dd8e" opacity=".6">${Array.from({length:26},(_,i)=>
+  `<circle cx="${(i*47)%200}" cy="${140+(i*29)%28}" r="${.6+(i%3)*.4}"/>`).join('')}</g>
+ <rect width="${W}" height="${H}" filter="url(#${u}n)" opacity=".12" style="mix-blend-mode:overlay"/>`},
+
+{n:'砂絵（粒）',b:u=>{const p=[];for(let i=0;i<1400;i++){const x=Math.random()*W,y=Math.random()*H;
+  p.push(`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${(.4+Math.random()*.7).toFixed(1)}"/>`);}
+ return `<defs><clipPath id="${u}a"><path d="${HULL}"/><path d="${DECK}"/>${SAILS.map(s=>`<path d="${s}"/>`).join('')}</clipPath>
+  <clipPath id="${u}b"><path d="${SEA}"/></clipPath></defs>
+ ${bg('#1b1712')}<g fill="#4a4034" opacity=".5">${p.join('')}</g>
+ <g clip-path="url(#${u}b)" fill="#7f96a8">${p.join('')}</g>
+ <g clip-path="url(#${u}a)" fill="#e8d8a8">${p.join('')}</g>
+ ${MASTS.map(([x,y,t])=>`<line x1="${x}" y1="${y}" x2="${x}" y2="${t}" stroke="#d8c49a" stroke-width="1.6" opacity=".8"/>`).join('')}`}},
+
+{n:'フラットな図案',b:u=>`${bg('#eceae2')}
+ ${ship({hull:'#e05a3a',sail:'#fbfaf6',mast:'#25303a',line:'#25303a',lw:0,flag:'#f2b134'})}
+ <path d="${SEA}" fill="#3aa0b8"/>
+ <path d="${SEA}" fill="#2b7f96" transform="translate(0,12)"/>`},
+
+{n:'絵本の一頁',b:u=>`<defs>${WOB(u+'w',.03,3,15)}${T(u+'g',.8,2,6)}
+ <filter id="${u}s"><feDropShadow dx="2" dy="3" stdDeviation="0" flood-color="#3b2f26" flood-opacity=".2"/></filter></defs>
+ ${bg('#fdf6e6')}<rect x="5" y="5" width="${W-10}" height="${H-10}" rx="9" fill="#bfe0e4"/>
+ <g filter="url(#${u}w)"><g filter="url(#${u}s)">
+ ${ship({hull:'#f0a15a',sail:'#fffaf0',mast:'#5b4636',line:'#5b4636',lw:2.8,flag:'#e0574f'})}</g>
+ <path d="${SEA}" fill="#7fb8c4" stroke="#5b4636" stroke-width="2.6"/></g>
+ <rect width="${W}" height="${H}" filter="url(#${u}g)" opacity=".1" style="mix-blend-mode:multiply"/>`},
+
+{n:'劇画（トーン）',b:u=>`<defs><pattern id="${u}t" width="4" height="4" patternUnits="userSpaceOnUse">
+  <circle cx="2" cy="2" r="1.1" fill="#141414"/></pattern>
+ <pattern id="${u}t2" width="3" height="3" patternUnits="userSpaceOnUse"><circle cx="1.5" cy="1.5" r=".5" fill="#141414"/></pattern></defs>
+ ${bg('#f6f5f1')}
+ <g stroke="#141414" stroke-width=".6" opacity=".45">${Array.from({length:36},(_,i)=>{const a=i*Math.PI/18;
+  return `<line x1="${100+Math.cos(a)*70}" y1="${80+Math.sin(a)*55}" x2="${100+Math.cos(a)*260}" y2="${80+Math.sin(a)*200}"/>`}).join('')}</g>
+ <rect width="${W}" height="${H}" fill="url(#${u}t2)" opacity=".4"/>
+ ${ship({hull:`url(#${u}t)`,sail:'#f6f5f1',mast:'#141414',line:'#141414',lw:2.6,flag:'#141414'})}
+ <path d="${SEA}" fill="url(#${u}t)" stroke="#141414" stroke-width="2.4"/>`},
+
+{n:'ドット絵（対照）',b:u=>{const px=[];const g=6;
+ const cols={h:'#8a5a2a',s:'#efe6d0',m:'#3a2a18',w:'#2f6f9e',f:'#c0402c'};
+ for(let y=0;y<H;y+=g)for(let x=0;x<W;x+=g){
+  const cx=x+g/2, cy=y+g/2; let c=null;
+  if(cy>132+Math.sin(cx/22)*5) c=cols.w;
+  if(cy>96&&cy<138&&cx>24+(cy-96)*.35&&cx<176-(cy-96)*.4) c=cols.h;
+  SAILS.forEach((_,i)=>{const s=[[44,80,40,78],[82,120,26,72],[122,156,44,80]][i];
+   if(cx>s[0]&&cx<s[1]&&cy>s[2]&&cy<s[3]) c=cols.s;});
+  MASTS.forEach(([mx,my,mt])=>{ if(Math.abs(cx-mx)<3&&cy>mt&&cy<my) c=cols.m;});
+  if(cx>100&&cx<128&&cy>20&&cy<32) c=cols.f;
+  if(c) px.push(`<rect x="${x}" y="${y}" width="${g}" height="${g}" fill="${c}"/>`);}
+ return `${bg('#9fd0e8')}${px.join('')}`}},
+
+{n:'ローポリ',b:u=>`<defs><linearGradient id="${u}a" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" stop-color="#e0b070"/><stop offset="1" stop-color="#7a4a24"/></linearGradient></defs>
+ ${bg('#12293c')}
+ <g stroke="#0d1c28" stroke-width=".7">
+  <path d="M 24 108 L 100 108 L 100 138 Z" fill="#8a5a2a"/>
+  <path d="M 100 108 L 176 108 L 100 138 Z" fill="#a9713a"/>
+  <path d="M 24 108 L 100 138 L 56 132 Z" fill="#6b4420"/>
+  <path d="M 176 108 L 100 138 L 148 132 Z" fill="#c08a4c"/>
+  ${SAILS.map((s,i)=>{const p=[[44,44,80,44,80,76],[82,30,120,31,120,70],[122,48,156,49,156,78]][i];
+   return `<path d="M ${p[0]} ${p[1]} L ${p[2]} ${p[3]} L ${p[4]} ${p[5]} Z" fill="#efe6d0"/>
+     <path d="M ${p[0]} ${p[1]} L ${p[4]} ${p[5]} L ${p[0]} ${p[5]-24} Z" fill="#cfc4a8"/>`}).join('')}
+  <path d="M 0 132 L 100 126 L 200 134 L 200 170 L 0 170 Z" fill="#1b4a68"/>
+  <path d="M 0 132 L 100 126 L 60 152 Z" fill="#256384"/></g>
+ ${MASTS.map(([x,y,t])=>`<line x1="${x}" y1="${y}" x2="${x}" y2="${t}" stroke="#2a1c10" stroke-width="2.4"/>`).join('')}`},
+
+{n:'粘土（クレイ）',b:u=>`<defs>
+ <filter id="${u}c" x="-20%" y="-20%" width="150%" height="150%">
+  <feGaussianBlur stdDeviation="1.2" result="b"/>
+  <feSpecularLighting in="b" surfaceScale="4" specularConstant=".8" specularExponent="18" lighting-color="#fff" result="sp">
+   <fePointLight x="40" y="10" z="90"/></feSpecularLighting>
+  <feComposite in="sp" in2="SourceAlpha" operator="in" result="sp2"/>
+  <feMerge><feMergeNode in="SourceGraphic"/><feMergeNode in="sp2"/></feMerge></filter>
+ <filter id="${u}s"><feDropShadow dx="2" dy="4" stdDeviation="3" flood-color="#2a1c14" flood-opacity=".45"/></filter></defs>
+ ${bg('#f0e4d4')}
+ <g filter="url(#${u}s)"><g filter="url(#${u}c)">
+ ${ship({hull:'#d0693f',sail:'#f6efe0',mast:'#8a5a34',line:'none',lw:0,flag:'#e8b23c'})}</g></g>
+ <g filter="url(#${u}c)"><path d="${SEA}" fill="#5fa8bc"/></g>`},
+
+{n:'硝子（透明）',b:u=>`<defs><linearGradient id="${u}a" x1="0" y1="0" x2="1" y2="1">
+  <stop offset="0" stop-color="#bfe8ff" stop-opacity=".85"/><stop offset=".5" stop-color="#7fc0e0" stop-opacity=".35"/>
+  <stop offset="1" stop-color="#e8fbff" stop-opacity=".8"/></linearGradient>
+ <filter id="${u}b"><feGaussianBlur stdDeviation="1"/></filter></defs>
+ ${bg('#0d2030')}
+ <g opacity=".9">${ship({hull:`url(#${u}a)`,sail:`url(#${u}a)`,mast:'#cfeeff',line:'#eaffff',lw:.9})}</g>
+ <g filter="url(#${u}b)" opacity=".5">${ship({hull:'none',sail:'none',mast:'#ffffff',line:'#ffffff',lw:2})}</g>
+ <path d="${SEA}" fill="#123a52" opacity=".8"/>`},
+
+{n:'霧の中',b:u=>`<defs>${T(u+'f',.012,5,27)}
+ <linearGradient id="${u}s" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#b8c6cc"/><stop offset="1" stop-color="#7f929c"/></linearGradient>
+ <filter id="${u}b"><feGaussianBlur stdDeviation="1.6"/></filter></defs>
+ <rect width="${W}" height="${H}" fill="url(#${u}s)"/>
+ <g filter="url(#${u}b)" opacity=".62">
+ ${ship({hull:'#3e4a52',sail:'#c8d2d6',mast:'#2b343a',line:'#2b343a',lw:1.4})}</g>
+ <path d="${SEA}" fill="#5f7480" opacity=".7"/>
+ <rect width="${W}" height="${H}" filter="url(#${u}f)" opacity=".35" style="mix-blend-mode:screen"/>`},
+
+{n:'星座線',b:u=>{const pts=[[24,108],[176,108],[100,138],[62,100],[62,34],[100,100],[100,20],[138,100],[138,40],[80,44],[120,31],[156,49],[196,90]];
+ return `${bg('#050912')}
+ <g fill="#eaf2ff">${Array.from({length:60},(_,i)=>
+  `<circle cx="${(i*73)%200}" cy="${(i*137)%170}" r="${.5+(i%3)*.35}" opacity="${.3+(i%4)*.15}"/>`).join('')}</g>
+ <g stroke="#8fb8ff" stroke-width=".8" opacity=".8">
+  ${ship({hull:'none',sail:'none',mast:'#8fb8ff',line:'#8fb8ff',lw:.8})}</g>
+ <g fill="#ffffff">${pts.map(p=>`<circle cx="${p[0]}" cy="${p[1]}" r="2.2"/>
+  <circle cx="${p[0]}" cy="${p[1]}" r="4.5" fill="#8fb8ff" opacity=".25"/>`).join('')}</g>`}},
+
+{n:'インクの染み',b:u=>`<defs><filter id="${u}e"><feTurbulence type="fractalNoise" baseFrequency=".07" numOctaves="5" seed="14" result="n"/>
+  <feDisplacementMap in="SourceGraphic" in2="n" scale="14" xChannelSelector="R" yChannelSelector="G"/></filter></defs>
+ ${bg('#efeae0')}
+ <g filter="url(#${u}e)">
+  ${ship({hull:'#101418',sail:'#101418',mast:'#101418',line:'#101418',lw:1,flag:'#101418'})}
+  <path d="${SEA}" fill="#101418" opacity=".85"/></g>
+ <g fill="#101418" opacity=".5">${Array.from({length:14},(_,i)=>
+  `<circle cx="${20+(i*53)%170}" cy="${150+(i*31)%18}" r="${.8+(i%4)*.7}"/>`).join('')}</g>`},
+
+{n:'木彫のレリーフ',b:u=>`<defs><filter id="${u}w" x="-10%" y="-10%" width="130%" height="130%">
+  <feTurbulence type="fractalNoise" baseFrequency=".006 .16" numOctaves="5" seed="8"/>
+  <feColorMatrix type="matrix" values="0 0 0 0 .42 0 0 0 0 .29 0 0 0 0 .15 0 0 0 .6 0"/></filter>
+ <filter id="${u}c" x="-20%" y="-20%" width="150%" height="150%">
+  <feDropShadow dx="0" dy="2" stdDeviation="1.4" flood-color="#2a1a0c" flood-opacity=".85"/>
+  <feDropShadow dx="0" dy="-1" stdDeviation="0" flood-color="#e8c692" flood-opacity=".5"/></filter></defs>
+ ${bg('#6b4a26')}<rect width="${W}" height="${H}" filter="url(#${u}w)"/>
+ <g filter="url(#${u}c)">${ship({hull:'#c69a5c',sail:'#d9b482',mast:'#8a5f30',line:'none',lw:0,flag:'#a8703a'})}
+ <path d="${SEA}" fill="#a87c46"/></g>`},
+
+{n:'ブリキ玩具',b:u=>`<defs><linearGradient id="${u}m" x1="0" y1="0" x2="0" y2="1">
+  <stop offset="0" stop-color="#f2f6f8"/><stop offset=".35" stop-color="#9fb0bc"/>
+  <stop offset=".5" stop-color="#e8eef2"/><stop offset="1" stop-color="#6b7c88"/></linearGradient>
+ ${T(u+'n',1.2,2,9)}</defs>
+ ${bg('#d8dee2')}
+ ${ship({hull:'#c8392c',sail:`url(#${u}m)`,mast:`url(#${u}m)`,line:'#3a4650',lw:1.4,flag:'#f2c230'})}
+ <path d="${SEA}" fill="#2f7fa8" stroke="#3a4650" stroke-width="1.4"/>
+ <g fill="#3a4650" opacity=".7">${Array.from({length:10},(_,i)=>
+  `<circle cx="${34+i*15}" cy="122" r="1.2"/>`).join('')}</g>
+ <rect width="${W}" height="${H}" filter="url(#${u}n)" opacity=".13" style="mix-blend-mode:overlay"/>`},
+
+{n:'夜光の海',b:u=>`<defs><radialGradient id="${u}s" cx=".5" cy="1" r=".9">
+  <stop offset="0" stop-color="#1d6b7a"/><stop offset="1" stop-color="#040a12"/></radialGradient>
+ <filter id="${u}g" x="-60%" y="-60%" width="220%" height="220%">
+  <feGaussianBlur stdDeviation="4" result="b"/><feMerge><feMergeNode in="b"/><feMergeNode in="SourceGraphic"/></feMerge></filter></defs>
+ <rect width="${W}" height="${H}" fill="url(#${u}s)"/>
+ ${ship({hull:'#0a1420',sail:'#16283a',mast:'#0a1420',line:'#2f6f7a',lw:1.2,flag:'#3fe8d0'})}
+ <g filter="url(#${u}g)"><path d="${SEA}" fill="none" stroke="#3fe8d0" stroke-width="2.4" opacity=".9"/></g>
+ <g filter="url(#${u}g)" fill="#7ff8e0">${Array.from({length:30},(_,i)=>
+  `<circle cx="${(i*67)%200}" cy="${134+(i*41)%32}" r="${.7+(i%3)*.5}" opacity="${.5+(i%3)*.2}"/>`).join('')}</g>`}
+];
+
+const grid=document.getElementById('grid');
+S.forEach((s,i)=>{
+  grid.insertAdjacentHTML('beforeend',
+   `<figure><svg viewBox="0 0 ${W} ${H}" xmlns="http://www.w3.org/2000/svg">${s.b('s'+i)}</svg>
+    <figcaption><span class="num">${i+1}</span>${s.n}</figcaption></figure>`);
+});
+</script>
