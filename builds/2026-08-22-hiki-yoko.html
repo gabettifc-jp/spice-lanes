@@ -1,0 +1,342 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>spice-lanes 見本13 ── 引いて、横から</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#171a21;color:#eef1f5;
+     font:14px/1.6 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+header{padding:16px 20px;border-bottom:1px solid #262b35}
+h1{margin:0 0 4px;font-size:15px;letter-spacing:.04em}
+header p{margin:0;font-size:12px;color:#9aa4b2}
+#hero{display:block;width:100%;max-width:1000px;margin:14px auto 0;border-radius:14px;
+      border:1px solid #262b35;cursor:grab;box-shadow:0 14px 46px rgba(0,0,0,.55)}
+#hero:active{cursor:grabbing}
+.bar{display:flex;gap:8px;justify-content:center;padding:11px 20px 0;flex-wrap:wrap}
+button{font:inherit;font-size:12.5px;padding:7px 14px;border-radius:20px;border:1px solid #3b414d;
+       background:#1d212a;color:#e6e6e6;cursor:pointer}
+button.on{background:#f0a63c;border-color:#f0a63c;color:#1b1408;font-weight:700}
+.hint{text-align:center;font-size:12px;color:#79828f;padding:8px 20px 0}
+footer{padding:12px 20px 26px;font-size:12px;color:#79828f;max-width:78ch}
+b{color:#eef1f5} code{background:#22262f;padding:1px 5px;border-radius:3px;font-size:11.5px}
+</style>
+
+<header>
+  <h1>spice-lanes 見本13 ── 引いて、横から</h1>
+  <p>船と同じ手つきでマップまで作った。<b>高さも直した</b>（島も船も水面の上に浮いていた）。</p>
+</header>
+
+<canvas id="hero"></canvas>
+<div class="bar" id="bar"></div>
+<p class="hint">ドラッグで回る／上下で見下ろす角度が変わる。ボタンは<b>視点のセット</b>。</p>
+
+<footer>
+  <b>マップに足したもの。</b>遠いものほど空の色に溶かす（霞）／水平線に<b>未踏の霧の壁</b>／
+  島の縁に白い泡の輪／浅瀬を明るい色に／航路を光る弧で結ぶ／雲の影が海を流れる。<br><br>
+  <b>直した高さ。</b>海面を y=0 に置き、島の汀線をそこに合わせ、船は喫水ぶんだけ沈めた。
+  これまでは海面が島より下にあって、<b>島が水面の上に浮いていた。</b>
+</footer>
+
+<script>
+/* ══ 3D ══════════════════════════════════════════════ */
+const V=(x,y,z)=>({x,y,z}), MM=()=>({v:[],f:[],ao:[],lines:[]});
+function P(m,p,ao=0){ m.v.push(p); m.ao.push(ao); return m.v.length-1; }
+const Q=(m,a,b,c,d,col)=>m.f.push({i:[a,b,c,d],c:col});
+const Tr=(m,a,b,c,col)=>m.f.push({i:[a,b,c],c:col});
+const LN=(m,pts,col,w)=>m.lines.push({pts,col,w});
+function smooth(m){ const nv=m.v.map(()=>({x:0,y:0,z:0}));
+  m.f.forEach(f=>{ const a=m.v[f.i[0]],b=m.v[f.i[1]],c=m.v[f.i[2]];
+    const ux=b.x-a.x,uy=b.y-a.y,uz=b.z-a.z,vx=c.x-a.x,vy=c.y-a.y,vz=c.z-a.z;
+    let nx=uy*vz-uz*vy,ny=uz*vx-ux*vz,nz=ux*vy-uy*vx;
+    const L=Math.hypot(nx,ny,nz)||1; f.n={x:nx/L,y:ny/L,z:nz/L};
+    f.i.forEach(i=>{nv[i].x+=f.n.x;nv[i].y+=f.n.y;nv[i].z+=f.n.z;}); });
+  m.n=nv.map(n=>{const L=Math.hypot(n.x,n.y,n.z)||1;return{x:n.x/L,y:n.y/L,z:n.z/L};}); return m; }
+function cyl(m,cx,cy,cz,r0,r1,hgt,col,SEG=10,ao0=.35,ao1=0){ const a=[],b=[];
+  for(let k=0;k<SEG;k++){ const t=k/SEG*Math.PI*2;
+    a.push(P(m,V(cx+Math.cos(t)*r0,cy,cz+Math.sin(t)*r0),ao0));
+    b.push(P(m,V(cx+Math.cos(t)*r1,cy-hgt,cz+Math.sin(t)*r1),ao1)); }
+  for(let k=0;k<SEG;k++) Q(m,a[k],a[(k+1)%SEG],b[(k+1)%SEG],b[k],col);
+  const c=P(m,V(cx,cy-hgt,cz),ao1); for(let k=0;k<SEG;k++) Tr(m,b[k],b[(k+1)%SEG],c,col); }
+function ball(m,cx,cy,cz,r,sx,sy,sz,col,NU=12,NV=8,ao=.25){ const g=[];
+  for(let j=0;j<=NV;j++){ const ph=j/NV*Math.PI, row=[];
+    for(let k=0;k<=NU;k++){ const th=k/NU*Math.PI*2;
+      row.push(P(m,V(cx+Math.sin(ph)*Math.cos(th)*r*sx, cy-Math.cos(ph)*r*sy,
+                     cz+Math.sin(ph)*Math.sin(th)*r*sz), ao*(j/NV))); } g.push(row); }
+  for(let j=0;j<NV;j++) for(let k=0;k<NU;k++) Q(m,g[j][k],g[j][k+1],g[j+1][k+1],g[j+1][k],col); }
+function rbox(m,x0,y0,z0,x1,y1,z1,col,R,ao=.24){
+  const N=R>.02?4:1, W=(x1-x0)/2, D=(z1-z0)/2, cx=(x0+x1)/2, cz=(z0+z1)/2, r=Math.min(W,D)*R;
+  const corner=(sx,sz)=>{ const out=[];
+    for(let i=0;i<=N;i++){ const a=i/N*Math.PI/2;
+      out.push([cx+sx*(W-r+Math.cos(a)*r), cz+sz*(D-r+Math.sin(a)*r)]); }
+    return sx*sz>0?out:out.reverse(); };
+  const pts=[...corner(1,1),...corner(-1,1),...corner(-1,-1),...corner(1,-1)];
+  const top=[],bot=[];
+  pts.forEach(([x,z])=>{ top.push(P(m,V(x,y1,z),0)); bot.push(P(m,V(x,y0,z),ao)); });
+  for(let i=0;i<pts.length;i++) Q(m,bot[i],bot[(i+1)%pts.length],top[(i+1)%pts.length],top[i],col);
+  const ct=P(m,V(cx,y1,cz),0); for(let i=0;i<pts.length;i++) Tr(m,top[i],top[(i+1)%pts.length],ct,col); }
+
+const C={ hull:[198,96,60], hull2:[168,74,46], deck:[246,206,138], deck2:[226,178,110],
+  sail:[255,252,244], mast:[186,132,80], accent:[248,86,96], iron:[92,96,108], lamp:[255,214,120],
+  sand:[250,228,166], grass:[124,206,112], grass2:[98,182,96], rock:[150,146,138],
+  trunk:[152,106,62], leaf:[74,186,100], leaf2:[110,212,126], wall:[250,238,212], roof:[230,120,86],
+  sea:[46,190,214], shallow:[120,224,226], deep:[26,138,180] };
+
+/* ── 船（見本12で直した向き。水線に合わせて沈める） ── */
+const SHIP_Y = -7;                              /* 甲板を水面より上へ */
+function ship(t,ox,oz){
+  const m=MM(), LEN=40, N=18, RN=14, R=1;
+  const wid=z=>18*Math.pow(Math.max(0,1-Math.pow(Math.abs(z)/(LEN*1.1),2.6)),.34)+3.4;
+  const dep=12, sheer=z=>-Math.pow(Math.abs(z)/LEN,1.7)*13;
+  const prof=[]; for(let k=0;k<RN;k++){ const a=k/(RN-1)*2-1, ax=Math.abs(a);
+    const trap=[a*(ax>.72?1:.58+.42*Math.pow(ax/.72,.6)), ax>.72?(1-(ax-.72)/.28):1];
+    const ang=Math.PI*(k/(RN-1)), circ=[-Math.cos(ang),Math.sin(ang)];
+    prof.push([trap[0]*(1-R)+circ[0]*R, trap[1]*(1-R)+circ[1]*R]); }
+  const ring=[];
+  for(let s=0;s<=N;s++){ const z=-LEN+s*(2*LEN/N), w=wid(z), sh=sheer(z)+SHIP_Y, r=[];
+    for(let k=0;k<RN;k++){ const [px,py]=prof[k];
+      r.push(P(m,V(px*w+ox+Math.sin(z*.06)*1.8, sh+py*dep, z+oz), .55*py)); }
+    ring.push(r); }
+  for(let s=0;s<N;s++){ for(let k=0;k<RN-1;k++)
+      Q(m,ring[s][k],ring[s][k+1],ring[s+1][k+1],ring[s+1][k],(k+s)%7===0?C.hull2:C.hull);
+    Q(m,ring[s][0],ring[s][RN-1],ring[s+1][RN-1],ring[s+1][0], s%2?C.deck:C.deck2); }
+  [0,N].forEach((s,n)=>{ const z=-LEN+s*(2*LEN/N), r=ring[s];
+    const c=P(m,V(ox,sheer(z)+SHIP_Y+dep*.45,z+oz+(n?12:-7)),.42);
+    for(let k=0;k<RN-1;k++) n?Tr(m,r[k],r[k+1],c,C.hull):Tr(m,r[k+1],r[k],c,C.hull);
+    Tr(m,r[0],r[RN-1],c,C.deck); });
+  for(let s=0;s<N;s++) [0,RN-1].forEach(k=>{ const a=m.v[ring[s][k]],b=m.v[ring[s+1][k]];
+    const a2=P(m,V(a.x*1.02+ox*.02,a.y-5,a.z),0), b2=P(m,V(b.x*1.02+ox*.02,b.y-5,b.z),0);
+    Q(m,ring[s][k],ring[s+1][k],b2,a2,s%2?C.deck:C.deck2); });
+  const cy0=sheer(-30)+SHIP_Y;
+  rbox(m,ox-13,cy0,oz-38,ox+13,cy0-17,oz-20,C.deck,.8);
+  rbox(m,ox-11,cy0-17,oz-36,ox+11,cy0-25,oz-22,C.hull,.85);
+  cyl(m,ox,cy0-25,oz-29,3,3,4,C.lamp,10,0,0);
+  const MZ=oz+3, MH=88;
+  cyl(m,ox,sheer(3)+SHIP_Y,MZ,4.4,2.8,MH,C.mast,12,.4,0);
+  const sail=(top,bot,halfW,bul,ph)=>{
+    const NX=14,NY=10,g=[], br=1+.15*Math.sin(t*1.5+ph);
+    for(let j=0;j<=NY;j++){ const row=[];
+      for(let k=0;k<=NX;k++){ const tx=k/NX*2-1, ty=j/NY;
+        const b=Math.cos(tx*Math.PI/2)*Math.sin((1-ty)*Math.PI*.92)*bul*br
+              + Math.sin(tx*9-t*2.4+ph)*.8*(1-ty);
+        row.push(P(m,V(ox+tx*halfW, top+(bot-top)*ty+Math.cos(tx*Math.PI/2)*5*ty, MZ-4-b),.3*ty)); }
+      g.push(row); }
+    for(let j=0;j<NY;j++) for(let k=0;k<NX;k++)
+      Q(m,g[j][k],g[j][k+1],g[j+1][k+1],g[j+1][k],C.sail);
+    const yard=[]; for(let k=0;k<=8;k++){ const tx=k/8*2-1;
+      yard.push(V(ox+tx*(halfW+2), top-2-Math.cos(tx*Math.PI/2)*4, MZ-4)); }
+    for(let k=0;k<8;k++){ const a=yard[k],b=yard[k+1];
+      Q(m,P(m,V(a.x,a.y-1.5,a.z-1),0),P(m,V(b.x,b.y-1.5,b.z-1),0),
+          P(m,V(b.x,b.y+1.5,b.z+1),0),P(m,V(a.x,a.y+1.5,a.z+1),0),C.mast); }
+    const rope=(a,b,sg)=>{ const p=[]; for(let k=0;k<=8;k++){ const u=k/8;
+      p.push(V(a.x+(b.x-a.x)*u,a.y+(b.y-a.y)*u+Math.sin(u*Math.PI)*sg,a.z+(b.z-a.z)*u)); }
+      LN(m,p,'rgba(60,40,24,.4)',1); };
+    rope(V(ox-halfW,top,MZ-4),V(ox,top-12,MZ),5);
+    rope(V(ox+halfW,top,MZ-4),V(ox,top-12,MZ),5);
+  };
+  const base=sheer(3)+SHIP_Y;
+  sail(base-MH*.92, base-MH*.62, 22, 9, 0);
+  sail(base-MH*.58, base-MH*.14, 30, 14, 1.1);
+  cyl(m,ox,base-MH*.94,MZ,6.5,6.5,6,C.mast,12,.35,0);
+  const fl=[],fl2=[];
+  for(let k=0;k<=6;k++){ const u=k/6;
+    fl .push(P(m,V(ox+Math.sin(t*3+u*4)*u*4, base-MH-14+u*2+Math.sin(t*2.6+u*3)*u*2.4, MZ-u*32),0));
+    fl2.push(P(m,V(ox+Math.sin(t*3+u*4)*u*4, base-MH-2 +u*6+Math.sin(t*2.6+u*3)*u*2.4, MZ-u*32),0)); }
+  for(let k=0;k<6;k++) Q(m,fl[k],fl[k+1],fl2[k+1],fl2[k],C.accent);
+  LN(m,[V(ox,base-MH*.94,MZ),V(ox,base-MH-14,MZ)],'rgba(120,80,40,.7)',1.6);
+  return smooth(m);
+}
+
+/* ── 島（汀線を水面 y=0 に合わせる） ─────────── */
+function isle(cx,cz,rad,hgt,seed,props){
+  const m=MM(), N=30, R=[[1.1,-.06],[1,0],[.9,.16],[.72,.4],[.5,.66],[.26,.88],[.06,1]];
+  const rn=k=>.88+.16*Math.sin(k*2.3+seed)+.09*Math.sin(k*5.1+seed*2);
+  const idx=R.map(([rf,hf],ri)=>{ const row=[];
+    for(let k=0;k<N;k++){ const a=k/N*Math.PI*2, j=rn(k+seed);
+      row.push(P(m,V(cx+Math.cos(a)*rad*rf*j, -hgt*hf, cz+Math.sin(a)*rad*rf*j),
+                ri===0?.5:ri===1?.34:.1)); } return row; });
+  for(let r=0;r<R.length-1;r++) for(let k=0;k<N;k++)
+    Q(m,idx[r][k],idx[r][(k+1)%N],idx[r+1][(k+1)%N],idx[r+1][k],
+      r===0?C.shallow : r===1?C.sand : r>=5?C.rock : (k%5?C.grass:C.grass2));
+  const top=P(m,V(cx,-hgt,cz),0);
+  for(let k=0;k<N;k++) Tr(m,idx[6][k],idx[6][(k+1)%N],top,C.rock);
+  props.forEach(([ax,az,kind,sc=1])=>{ const x=cx+ax*rad, z=cz+az*rad, base=-hgt*.42;
+    if(kind==='tree'){ cyl(m,x,base,z,2*sc,1.4*sc,12*sc,C.trunk,8,.4,0);
+      ball(m,x,base-14*sc,z,8.5*sc,1,.84,1,C.leaf,12,8);
+      ball(m,x+3.6*sc,base-10*sc,z-2.6*sc,5.6*sc,1,.8,1,C.leaf2,10,7); }
+    else { rbox(m,x-6*sc,base,z-6*sc,x+6*sc,base-9*sc,z+6*sc,C.wall,.5,.3);
+      cyl(m,x,base-9*sc,z,9.5*sc,.6,8*sc,C.roof,4,0,0); } });
+  return smooth(m);
+}
+/* ── 海（y=0） ─────────────────────────── */
+function ocean(t){ const m=MM(), N=44, S=1500;
+  const h=(x,z)=>Math.sin(x/70+t*.7)*2.6+Math.cos(z/58-t*.55)*2.2+Math.sin((x+z)/120+t*.3)*1.6;
+  const g=[]; for(let j=0;j<=N;j++){ const row=[];
+    for(let k=0;k<=N;k++){ const x=-S/2+k*S/N,z=-S/2+j*S/N; row.push(P(m,V(x,h(x,z),z))); } g.push(row); }
+  for(let j=0;j<N;j++) for(let k=0;k<N;k++){
+    const x=-S/2+k*S/N,z=-S/2+j*S/N, d=Math.hypot(x,z);
+    Q(m,g[j][k],g[j][k+1],g[j+1][k+1],g[j+1][k], d>430?C.deep:C.sea); }
+  return smooth(m); }
+
+const ISLES=[
+  {m:isle(-210,-150,86,52,3,[[-.3,-.2,'tree'],[.25,.15,'tree',.85],[.05,-.5,'hut'],[.45,-.3,'tree',.7],[-.5,.25,'tree',.9]]),
+   c:[-210,-150,90]},
+  {m:isle(230,180,64,34,9,[[0,0,'tree',1.1],[-.4,.3,'hut',.8],[.35,-.3,'tree',.8]]), c:[230,180,68]},
+  {m:isle(180,-260,46,26,17,[[0,-.1,'tree',.9],[-.3,.3,'tree',.7]]), c:[180,-260,50]},
+  {m:isle(-330,240,54,30,23,[[.1,.1,'tree',1],[-.35,-.2,'hut',.7]]), c:[-330,240,58]}
+];
+const LANES=[ [[-210,-150],[230,180]], [[230,180],[180,-260]] ];
+
+/* ══ 描く ══════════════════════════════════════════ */
+const cl=v=>v<0?0:v>255?255:v|0;
+const L={x:-.42,y:-.84,z:.34}; (()=>{const n=Math.hypot(L.x,L.y,L.z);L.x/=n;L.y/=n;L.z/=n;})();
+const SKY=[[168,226,244],[224,244,250]];
+let SEA=null, SHIP=null, T=0;
+
+function render(cv,o){
+  const {yaw,pitch,zoom,t,ratio=.5}=o;
+  const dpr=Math.min(2,devicePixelRatio||1), w=cv.clientWidth||300, h=Math.round(w*ratio);
+  cv.width=w*dpr; cv.height=h*dpr;
+  const g=cv.getContext('2d'); g.setTransform(dpr,0,0,dpr,0,0);
+  /* 空 */
+  const G=g.createLinearGradient(0,0,0,h);
+  G.addColorStop(0,'#5fc4e8'); G.addColorStop(.55,'#a8ddef'); G.addColorStop(1,'#e2f2f6');
+  g.fillStyle=G; g.fillRect(0,0,w,h);
+  g.save(); g.globalAlpha=.5; g.fillStyle='#fff';
+  [[0.18,0.16,.09],[0.52,0.10,.07],[0.78,0.2,.06]].forEach(([px,py,r])=>{
+    g.beginPath(); g.ellipse(w*px,h*py,w*r,h*r*.42,0,0,7); g.fill();
+    g.beginPath(); g.ellipse(w*px+w*r*.6,h*py+h*.02,w*r*.66,h*r*.34,0,0,7); g.fill(); });
+  g.restore();
+
+  const cy=Math.cos(yaw),sy=Math.sin(yaw),cp=Math.cos(pitch),sp=Math.sin(pitch);
+  const sc=(w/900)*zoom;
+  const proj=p=>{ const x=p.x*cy+p.z*sy, z=-p.x*sy+p.z*cy;
+    return {sx:w/2+x*sc, sy:h*.60+(p.y*cp-z*sp)*sc, d:p.y*sp+z*cp}; };
+  const fogOf=d=>Math.min(.82,Math.max(0,(d+120)/900));      /* 遠いほど空へ溶かす */
+
+  function mesh(m,olcol,two){
+    const pr=m.v.map(proj);
+    const vi=m.n.map(n=>Math.max(0,-(n.x*L.x+n.y*L.y+n.z*L.z)));
+    const list=m.f.map(f=>({f,d:f.i.reduce((s,i)=>s+pr[i].d,0)/f.i.length})).sort((a,b)=>b.d-a.d);
+    g.save(); g.beginPath();
+    list.forEach(({f})=>{ const p=f.i.map(i=>pr[i]);
+      g.moveTo(p[0].sx,p[0].sy); for(let i=1;i<p.length;i++) g.lineTo(p[i].sx,p[i].sy); g.closePath(); });
+    g.strokeStyle=olcol; g.lineWidth=Math.max(1.2,3.4*Math.min(1,sc*2)); g.lineJoin='round'; g.stroke(); g.restore();
+    for(const {f,d} of list){
+      const p=f.i.map(i=>pr[i]);
+      const cr=(p[1].sx-p[0].sx)*(p[2].sy-p[0].sy)-(p[1].sy-p[0].sy)*(p[2].sx-p[0].sx);
+      if(cr>0 && !two) continue;
+      let lo=0,hi=0; f.i.forEach((idx,n)=>{ if(vi[idx]<vi[f.i[lo]])lo=n; if(vi[idx]>vi[f.i[hi]])hi=n; });
+      const ao=i=>1-(m.ao[i]||0)*.5;
+      const kA=(.68+vi[f.i[lo]]*.48)*ao(f.i[lo]), kB=(.68+vi[f.i[hi]]*.48)*ao(f.i[hi]);
+      const spec=Math.pow(Math.max(0,-f.n.y),2.2)*30;
+      const fg=fogOf(d), sk=[196,232,244];
+      const col=k=>{ const c=[f.c[0]*k+16+spec,f.c[1]*k+16+spec,f.c[2]*k+16+spec];
+        return `rgb(${cl(c[0]*(1-fg)+sk[0]*fg)},${cl(c[1]*(1-fg)+sk[1]*fg)},${cl(c[2]*(1-fg)+sk[2]*fg)})`; };
+      g.beginPath(); g.moveTo(p[0].sx,p[0].sy);
+      for(let n=1;n<p.length;n++) g.lineTo(p[n].sx,p[n].sy); g.closePath();
+      if(Math.abs(kA-kB)<.02) g.fillStyle=col((kA+kB)/2);
+      else { const gr=g.createLinearGradient(p[lo].sx,p[lo].sy,p[hi].sx,p[hi].sy);
+        gr.addColorStop(0,col(kA)); gr.addColorStop(1,col(kB)); g.fillStyle=gr; }
+      g.strokeStyle=col((kA+kB)/2); g.lineWidth=.7; g.fill(); g.stroke(); }
+    m.lines.forEach(ln=>{ const p=ln.pts.map(proj);
+      g.beginPath(); g.moveTo(p[0].sx,p[0].sy);
+      for(let i=1;i<p.length;i++) g.lineTo(p[i].sx,p[i].sy);
+      g.strokeStyle=ln.col; g.lineWidth=Math.max(.5,ln.w*sc*1.6); g.lineCap='round'; g.stroke(); });
+  }
+  const dark=c=>`rgb(${cl(c[0]*.44)},${cl(c[1]*.44)},${cl(c[2]*.44)})`;
+
+  mesh(SEA,dark(C.sea),true);
+  /* 雲の影が海を流れる */
+  g.save(); g.globalAlpha=.10; g.fillStyle='#0a2a3c';
+  [[-260,-80],[140,60],[-40,320]].forEach(([x,z],i)=>{ const c=proj(V(x+t*9%700-350,0,z));
+    g.beginPath(); g.ellipse(c.sx,c.sy,150*sc,150*sc*Math.cos(pitch)*.8,0,0,7); g.filter='blur(10px)'; g.fill(); });
+  g.restore();
+  /* 島の泡の輪と落ち影 */
+  ISLES.forEach(({c})=>{ const [x,z,r]=c, p=proj(V(x,0,z));
+    g.save(); g.beginPath(); g.ellipse(p.sx,p.sy,r*.96*sc,r*.96*sc*Math.cos(pitch)*.92,0,0,7);
+    g.fillStyle='rgba(6,40,60,.20)'; g.filter='blur(8px)'; g.fill(); g.restore();
+    g.beginPath(); g.ellipse(p.sx,p.sy,r*1.03*sc,r*1.03*sc*Math.cos(pitch)*.92,0,0,7);
+    g.strokeStyle='rgba(255,255,255,.8)'; g.lineWidth=Math.max(1.4,4*sc); g.stroke(); });
+  /* 航路：光る弧 */
+  LANES.forEach(([a,b])=>{ const pts=[];
+    for(let k=0;k<=24;k++){ const u=k/24;
+      pts.push(V(a[0]+(b[0]-a[0])*u, -Math.sin(u*Math.PI)*26, a[1]+(b[1]-a[1])*u)); }
+    const pr=pts.map(proj);
+    g.beginPath(); g.moveTo(pr[0].sx,pr[0].sy); pr.forEach(p=>g.lineTo(p.sx,p.sy));
+    g.strokeStyle='rgba(255,214,120,.85)'; g.lineWidth=Math.max(1.6,4.4*sc);
+    g.lineCap='round'; g.stroke();
+    g.strokeStyle='rgba(255,255,255,.5)'; g.lineWidth=Math.max(.7,1.6*sc); g.stroke(); });
+  ISLES.forEach(({m})=>mesh(m,dark(C.grass),false));
+  /* 船の落ち影と航跡 */
+  const sp0=proj(V(0,0,0));
+  g.save(); g.beginPath(); g.ellipse(sp0.sx,sp0.sy,26*sc,26*sc*Math.cos(pitch)*.9,0,0,7);
+  g.fillStyle='rgba(6,40,60,.26)'; g.filter='blur(6px)'; g.fill(); g.restore();
+  const wake=[]; for(let k=0;k<=10;k++){ const u=k/10;
+    wake.push(proj(V(Math.sin(u*4+t)*u*7, 0, -46-u*150))); }
+  g.beginPath(); g.moveTo(wake[0].sx,wake[0].sy); wake.forEach(p=>g.lineTo(p.sx,p.sy));
+  g.strokeStyle='rgba(255,255,255,.42)'; g.lineWidth=Math.max(1.6,9*sc); g.lineCap='round'; g.stroke();
+  mesh(SHIP,dark(C.hull),false);
+  /* 未踏：水平線に霧の壁 */
+  const hz=proj(V(0,0,-720)).sy;
+  const fw=g.createLinearGradient(0,hz-h*.22,0,hz+h*.10);
+  fw.addColorStop(0,'rgba(226,244,250,0)'); fw.addColorStop(.45,'rgba(226,244,250,.92)');
+  fw.addColorStop(1,'rgba(226,244,250,0)');
+  g.fillStyle=fw; g.fillRect(0,hz-h*.22,w,h*.32);
+  /* きらめき */
+  for(let i=0;i<26;i++){ const a=i*2.399,r=60+((i*97)%520);
+    const c=proj(V(Math.cos(a)*r,0,Math.sin(a)*r));
+    const s=(1.6+((i*7)%3))*(0.6+.5*Math.abs(Math.sin(t*2+i)))*Math.max(.5,sc*2);
+    g.save(); g.globalAlpha=.30+((i%3)*.14); g.fillStyle='#fff'; g.beginPath();
+    g.moveTo(c.sx,c.sy-s); g.quadraticCurveTo(c.sx,c.sy,c.sx+s,c.sy);
+    g.quadraticCurveTo(c.sx,c.sy,c.sx,c.sy+s); g.quadraticCurveTo(c.sx,c.sy,c.sx-s,c.sy);
+    g.quadraticCurveTo(c.sx,c.sy,c.sx,c.sy-s); g.fill(); g.restore(); }
+  drawUI(g,w,h,t);
+}
+function drawUI(g,w,h,t){
+  const R=(x,y,ww,hh,r)=>{ g.beginPath(); g.moveTo(x+r,y);
+    g.arcTo(x+ww,y,x+ww,y+hh,r); g.arcTo(x+ww,y+hh,x,y+hh,r);
+    g.arcTo(x,y+hh,x,y,r); g.arcTo(x,y,x+ww,y,r); g.closePath(); };
+  const S=w/1000, pill=(x,y,ww,hh,fill,txt,sub)=>{ g.save();
+    g.shadowColor='rgba(4,18,34,.45)'; g.shadowBlur=10; g.shadowOffsetY=4;
+    R(x,y,ww,hh,hh/2); g.fillStyle=fill; g.fill(); g.restore();
+    R(x,y,ww,hh,hh/2); g.strokeStyle='rgba(255,255,255,.75)'; g.lineWidth=2; g.stroke();
+    g.fillStyle='#3a2a1c'; g.textBaseline='middle'; g.font=`700 ${hh*.44}px system-ui,sans-serif`;
+    g.fillText(txt,x+hh*.86,y+hh*.55); g.fillStyle='rgba(58,42,28,.62)';
+    g.font=`600 ${hh*.29}px system-ui,sans-serif`; g.fillText(sub,x+hh*.86,y+hh*.2); };
+  pill(16*S,16*S,156*S,44*S,'#fff6dc','1,240','所持');
+  pill(w-186*S,16*S,170*S,44*S,'#ffe0e0','4,000','取り立てまで 7');
+  const pop=1+.04*Math.sin(t*2.6);
+  const bt=(cx,cyy,r,fill,label)=>{ g.save(); g.shadowColor='rgba(4,18,34,.5)';
+    g.shadowBlur=12; g.shadowOffsetY=6; g.beginPath(); g.arc(cx,cyy,r,0,7);
+    g.fillStyle=fill; g.fill(); g.restore(); g.fillStyle='#fff';
+    g.font=`700 ${r*.48}px system-ui,sans-serif`; g.textAlign='center'; g.textBaseline='middle';
+    g.fillText(label,cx,cyy); g.textAlign='start'; };
+  const by=h-42*S, br=30*S;
+  bt(w/2-88*S,by,br,'#4fb8f0','繋ぐ'); bt(w/2,by+4*S,br*1.15*pop,'#f0a63c','出す');
+  bt(w/2+88*S,by,br,'#8f8f9c','待つ');
+}
+
+/* ── 視点のセット ── */
+const VIEWS=[
+ {n:'かなり引き・横から', yaw:.55, pitch:.13, zoom:.62},
+ {n:'引き・少し斜め',     yaw:.62, pitch:.30, zoom:.80},
+ {n:'中くらい',           yaw:.62, pitch:.50, zoom:1.25},
+ {n:'寄り',               yaw:.62, pitch:.55, zoom:2.4}
+];
+let yaw=VIEWS[0].yaw, pitch=VIEWS[0].pitch, zoom=VIEWS[0].zoom, drag=null;
+const bar=document.getElementById('bar');
+VIEWS.forEach((v,i)=>{ const b=document.createElement('button'); b.textContent=v.n;
+  if(!i) b.className='on';
+  b.onclick=()=>{ yaw=v.yaw;pitch=v.pitch;zoom=v.zoom;
+    [...bar.children].forEach(c=>c.className=''); b.className='on'; };
+  bar.appendChild(b); });
+
+const hero=document.getElementById('hero');
+hero.addEventListener('pointerdown',e=>{drag={x:e.clientX,y:e.clientY,yaw,pitch};
+  hero.setPointerCapture(e.pointerId);});
+hero.addEventListener('pointermove',e=>{ if(!drag)return;
+  yaw=drag.yaw+(e.clientX-drag.x)*.006;
+  pitch=Math.max(.05,Math.min(1.2,drag.pitch+(e.clientY-drag.y)*.004)); });
+addEventListener('pointerup',()=>drag=null);
+(function frame(){ T+=1/60; SEA=ocean(T); SHIP=ship(T,0,0);
+  render(hero,{yaw,pitch,zoom,t:T,ratio:.5}); requestAnimationFrame(frame); })();
+</script>
