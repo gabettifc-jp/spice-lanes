@@ -36,7 +36,6 @@ const K = {
   START_R: 9,                   /* 最初に見えている半径（決定53） */
   EXPLORE_COST: 14,             /* 探索の費用／一升（決定27） */
   ROUTE_STEP: 0.5,              /* 道を細かく刻む間隔（升・決定89） */
-  HARBOUR_SLACK: 1.0,           /* 港を出る口の広さ（升）。近い水から順にこの分だけ口にする */
   PIN_REFINE: 6,                /* ピンを上限まで詰め直す回数（決定89） */
 
   /* ── 航路（決定33・34・69・71・73） ── */
@@ -263,18 +262,15 @@ function distField(sx,sy){
   if(ST[i0]!==2){ d[i0]=0; prev[i0]=-2; hpush(h,0,i0); }
   else {
     /* 出発が港（陸）のとき、船は入江に居る。
-       ただし口を広く取ると、港のまわりの陸をまたいで出られてしまう。
-       いちばん近い水から HARBOUR_SLACK 升ぶんだけを口にする（決定89） */
-    const R0=K.COAST_REACH+2, cand=[];
-    let dmin=Infinity;
+       口の広さは COAST_REACH ── 航路を引くときの港（決定90 の near）と同じ物差し。
+       がべ「港の広さは広いほうに合わせる」（決定93）。
+       ここが別の数字だったので、探索と航路で港の広さが二つあった */
+    const R0=K.COAST_REACH;
     for(let dy=-R0;dy<=R0;dy++) for(let dx=-R0;dx<=R0;dx++){
       const x=ix+dx, y=iy+dy;
       if(x<0||y<0||x>=K.COLS||y>=K.ROWS) continue;
       const i=pi(x,y); if(ST[i]===2) continue;
       const w=Math.hypot(x-sx,y-sy); if(w>R0) continue;
-      cand.push([w,i]); if(w<dmin) dmin=w; }
-    for(const [w,i] of cand){
-      if(w>dmin+K.HARBOUR_SLACK) continue;
       if(w<d[i]){ d[i]=w; prev[i]=-2; hpush(h,w,i); } }
   }
   while(h.length){ const [k,cur]=hpop(h); if(k>d[cur]+1e-9) continue;
