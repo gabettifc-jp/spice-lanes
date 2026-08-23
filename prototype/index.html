@@ -59,6 +59,13 @@ const K = {
   ISO_COAST: 0.50,             /* 海岸線を取る高さ */
   ISO_GRASS: 0.72,             /* 草のふちを取る高さ（砂の帯の広さになる） */
   OUT_W: 0.34,                 /* 輪郭の太さ（升に対する比） */
+  PAT_PX: 96,                  /* 模様の一枚の大きさ（画素） */
+  TREE_D: 2.0,                 /* 木の間隔（升）。小さいほど密 */
+  ROCK_D: 9.0,                 /* 岩の間隔（升） */
+  FOAM_STEP: 0.55,             /* 縁の泡の間隔（升） */
+  FOAM_OUT: 0.55,              /* 泡を海側へどれだけ出すか（升） */
+  FOAM_HZ: 1.6,                /* 泡の揺れの速さ */
+  DECO_MAX: 4000,              /* 飾りの上限。数えて出す */
   OUT: '#141b26', LW: 0.030,
   FOG: 'rgba(9,16,28,.84)',
   BOB_A: 0.5, BOB_HZ: 2.2,
@@ -492,6 +499,85 @@ function addLoopsOn(ctx,loops){
 const g2ref={ctx:null};
 function addLoops(loops){ addLoopsOn(g,loops); }
 
+/* ══ 模様（面の上に乗せるもの）════════════════════════
+   形は等高線のまま。面には模様を敷いて、等高線で切り抜く */
+const PAT={};
+function makePattern(name,draw){
+  const c=document.createElement('canvas'); c.width=c.height=K.PAT_PX;
+  const x=c.getContext('2d'); draw(x,K.PAT_PX); PAT[name]=g.createPattern(c,'repeat');
+}
+let patDone=false;
+function buildPatterns(){
+  if(patDone) return; patDone=true;
+  let sd=7777; const rr=()=>((sd=sd*16807%2147483647)-1)/2147483646;
+  makePattern('grass',(x,N)=>{
+    x.fillStyle=C.grass; x.fillRect(0,0,N,N);
+    for(let i=0;i<240;i++){ const px=rr()*N, py=rr()*N, r=1+rr()*2.2;
+      x.fillStyle=rr()<.5?'rgba(74,168,72,.55)':'rgba(140,225,120,.45)';
+      x.beginPath(); x.ellipse(px,py,r*1.6,r,0,0,7); x.fill(); }
+    for(let i=0;i<70;i++){ const px=rr()*N, py=rr()*N;   /* 草の房 */
+      x.strokeStyle='rgba(58,140,58,.5)'; x.lineWidth=1.4; x.lineCap='round';
+      x.beginPath(); x.moveTo(px,py); x.lineTo(px+(rr()-.5)*4,py-3-rr()*3); x.stroke(); }
+  });
+  makePattern('sand',(x,N)=>{
+    x.fillStyle=C.sand; x.fillRect(0,0,N,N);
+    for(let i=0;i<300;i++){ const px=rr()*N, py=rr()*N;
+      x.fillStyle=rr()<.5?'rgba(220,185,108,.5)':'rgba(255,244,210,.55)';
+      x.beginPath(); x.arc(px,py,.6+rr()*1.5,0,7); x.fill(); }
+  });
+  makePattern('sea',(x,N)=>{
+    x.fillStyle=C.sea; x.fillRect(0,0,N,N);
+    for(let i=0;i<26;i++){ const py=rr()*N, w=8+rr()*30;
+      x.strokeStyle='rgba(38,153,196,.55)'; x.lineWidth=2+rr()*3; x.lineCap='round';
+      x.beginPath(); x.moveTo(rr()*N,py); x.lineTo(rr()*N+w,py+(rr()-.5)*3); x.stroke(); }
+    for(let i=0;i<40;i++){ const px=rr()*N, py=rr()*N;
+      x.strokeStyle='rgba(234,252,255,.30)'; x.lineWidth=1.6; x.lineCap='round';
+      x.beginPath(); x.moveTo(px,py); x.lineTo(px+3+rr()*6,py); x.stroke(); }
+  });
+}
+
+/* ══ 飾り（縁に沿って撒くもの）════════════════════════ */
+let DECO={foam:[],rock:[],tree:[]};
+function buildDeco(){
+  DECO={foam:[],rock:[],tree:[]};
+  let sd=31337; const rr=()=>((sd=sd*16807%2147483647)-1)/2147483646;
+  /* 縁：等高線をなぞって、一定間隔で泡と岩を置く */
+  Lland.forEach(loop=>{
+    let acc=0;
+    for(let i=0;i<loop.length-1;i++){
+      const a=loop[i], b=loop[i+1];
+      const dx=b[0]-a[0], dy=b[1]-a[1], len=Math.hypot(dx,dy);
+      if(len<1e-6) continue;
+      const nx=dy/len, ny=-dx/len;              /* 法線 */
+      let t=0;
+      while(acc+ (len-t) >= K.FOAM_STEP){
+        const need=K.FOAM_STEP-acc; t+=need; acc=0;
+        const px=a[0]+dx*(t/len), py=a[1]+dy*(t/len);
+        if(DECO.foam.length<K.DECO_MAX)
+          DECO.foam.push({x:px,y:py,nx,ny,r:.22+rr()*.30,ph:rr()*7});
+        if(rr()<K.FOAM_STEP/K.ROCK_D && DECO.rock.length<K.DECO_MAX)
+          DECO.rock.push({x:px-nx*(.4+rr()*.5), y:py-ny*(.4+rr()*.5),
+                          r:.11+rr()*.13, k:rr()});
+      }
+      acc+=len-t;
+    }
+  });
+  /* 中：草の面に木を撒く（等高線の内側だけ） */
+  const step=K.TREE_D;
+  for(let y=0;y<K.ROWS;y+=1) for(let x=0;x<K.COLS;x+=1){
+    if(ST[pi(x,y)]!==2) continue;
+    let inner=true;
+    for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1]]){
+      const nx2=x+dx, ny2=y+dy;
+      if(nx2<0||ny2<0||nx2>=K.COLS||ny2>=K.ROWS){ inner=false; break; }
+      if(ST[pi(nx2,ny2)]!==2){ inner=false; break; } }
+    if(!inner) continue;
+    if(rr()>1/(step*step)) continue;
+    if(DECO.tree.length<K.DECO_MAX)
+      DECO.tree.push({x:x+.2+rr()*.6, y:y+.2+rr()*.6, s:.7+rr()*.6, ph:rr()*7});
+  }
+}
+
 /* ══ 描く（tetsuki-pop.md の手つき） ══════════════════════ */
 function el(x,y,rx,ry,fill,lw){ g.beginPath(); g.ellipse(x,y,rx,ry,0,0,7);
   g.fillStyle=fill; g.fill(); if(lw){g.strokeStyle=K.OUT;g.lineWidth=lw;g.stroke();} }
@@ -558,28 +644,75 @@ function draw(t){
     const known=(x,y)=>ST[pi(x,y)]!==0, isLand=(x,y)=>ST[pi(x,y)]===2;
     const Fl=blurField(isLand), Fk=blurField(known);
     Lland=isoLoops(Fl,K.ISO_COAST); Lgrass=isoLoops(Fl,K.ISO_GRASS);
-    Lknown=isoLoops(Fk,K.ISO_COAST); dirty=false;
+    Lknown=isoLoops(Fk,K.ISO_COAST); buildDeco(); dirty=false;
   }
   const OW=Math.max(3,s*K.OUT_W);
   g.lineJoin='round'; g.lineCap='round';
 
-  /* 海 */
-  addLoops(Lknown); g.fillStyle=C.sea; g.fill('evenodd');
-  g.save(); addLoops(Lknown); g.clip('evenodd');
-  g.fillStyle=C.sea2; g.globalAlpha=.45;
-  for(let y=0;y<K.ROWS;y+=6){ const q=cellToPx(0,y); g.fillRect(0,q.y,W,s*3); }
-  g.restore();
+  buildPatterns();
+  const patScale=s/14;                       /* 模様の大きさを倍率に合わせる */
 
-  /* 陸：輪郭 → 砂 → 草 → 照り */
+  /* 海：模様を敷いて等高線で切り抜く */
+  g.save(); addLoops(Lknown); g.clip('evenodd');
+  g.save(); g.scale(patScale,patScale);
+  g.fillStyle=PAT.sea; g.fillRect(-W/patScale,-H/patScale,W*3/patScale,H*3/patScale);
+  g.restore(); g.restore();
+
+  /* 縁の泡（海側）。等高線に沿って撒いてある */
+  g.lineCap='round';
+  DECO.foam.forEach(f=>{
+    const q=cellToPx(f.x+f.nx*K.FOAM_OUT+.5, f.y+f.ny*K.FOAM_OUT+.5);
+    if(q.x<-20||q.x>W+20||q.y<-20||q.y>H+20) return;
+    const a=.30+.45*(0.5+0.5*Math.sin(t*K.FOAM_HZ+f.ph));
+    g.beginPath(); g.arc(q.x,q.y,f.r*s,0,7);
+    g.fillStyle='rgba(234,252,255,'+a.toFixed(2)+')'; g.fill();
+  });
+
+  /* 陸：輪郭 → 砂の模様 → 草の模様 */
   addLoops(Lland);
   g.strokeStyle=K.OUT; g.lineWidth=OW*2; g.stroke();
-  g.fillStyle=C.sand; g.fill('evenodd');
+  g.save(); addLoops(Lland); g.clip('evenodd');
+  g.save(); g.scale(patScale,patScale);
+  g.fillStyle=PAT.sand; g.fillRect(-W/patScale,-H/patScale,W*3/patScale,H*3/patScale);
+  g.restore(); g.restore();
+
   addLoops(Lgrass);
   g.strokeStyle=K.OUT; g.lineWidth=OW*0.7; g.stroke();
-  g.fillStyle=C.grass; g.fill('evenodd');
   g.save(); addLoops(Lgrass); g.clip('evenodd');
-  addLoops(Lgrass); g.strokeStyle='rgba(255,255,255,.20)'; g.lineWidth=OW*2.4; g.stroke();
+  g.save(); g.scale(patScale,patScale);
+  g.fillStyle=PAT.grass; g.fillRect(-W/patScale,-H/patScale,W*3/patScale,H*3/patScale);
   g.restore();
+  addLoops(Lgrass); g.strokeStyle='rgba(255,255,255,.16)'; g.lineWidth=OW*2.4; g.stroke();
+  g.restore();
+
+  /* 岸の岩 */
+  DECO.rock.forEach(r=>{
+    const q=cellToPx(r.x+.5,r.y+.5);
+    if(q.x<-20||q.x>W+20||q.y<-20||q.y>H+20) return;
+    g.beginPath(); g.ellipse(q.x,q.y,r.r*s*1.25,r.r*s*.85,0,0,7);
+    g.fillStyle=r.k<.5?'#9aa6a8':'#7d8a8c'; g.fill();
+    g.strokeStyle=K.OUT; g.lineWidth=Math.max(1,OW*0.35); g.stroke();
+    g.beginPath(); g.ellipse(q.x-r.r*s*.3,q.y-r.r*s*.25,r.r*s*.45,r.r*s*.28,0,0,7);
+    g.fillStyle='rgba(255,255,255,.30)'; g.fill();
+  });
+
+  /* 木 */
+  DECO.tree.forEach(tr=>{
+    const q=cellToPx(tr.x,tr.y);
+    if(q.x<-20||q.x>W+20||q.y<-20||q.y>H+20) return;
+    const R=tr.s*s*.62, sw=Math.sin(t*1.1+tr.ph)*R*.10;
+    g.beginPath(); g.ellipse(q.x,q.y+R*.85,R*.75,R*.28,0,0,7);
+    g.fillStyle='rgba(20,45,30,.22)'; g.fill();
+    g.beginPath(); g.moveTo(q.x-R*.13,q.y+R*.7); g.lineTo(q.x-R*.10+sw,q.y);
+    g.lineTo(q.x+R*.10+sw,q.y); g.lineTo(q.x+R*.13,q.y+R*.7); g.closePath();
+    g.fillStyle='#a8703c'; g.fill();
+    g.strokeStyle=K.OUT; g.lineWidth=Math.max(1,OW*0.3); g.stroke();
+    g.beginPath(); g.ellipse(q.x+sw,q.y-R*.30,R*.72,R*.66,0,0,7);
+    g.fillStyle='#4aa848'; g.fill();
+    g.strokeStyle=K.OUT; g.lineWidth=Math.max(1.2,OW*0.42); g.stroke();
+    g.beginPath(); g.ellipse(q.x+sw-R*.22,q.y-R*.48,R*.34,R*.26,0,0,7);
+    g.fillStyle='rgba(160,235,140,.55)'; g.fill();
+  });
 
   /* 霧（未探索）── 別紙に描いて destination-out で抜く */
   if(!fogC) fogC=document.createElement('canvas');
