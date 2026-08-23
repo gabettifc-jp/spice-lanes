@@ -1,0 +1,130 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>見本25 ── Phaser で同じ島を置く</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0e1420;color:#eef1f5;
+  font:13px/1.6 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+header{padding:12px 18px;border-bottom:1px solid #262b35}
+h1{margin:0 0 3px;font-size:15px} header p{margin:0;font-size:12px;color:#9aa4b2}
+#g{padding:14px 18px}
+canvas{border:1px solid #262b35;border-radius:12px}
+footer{padding:12px 18px 24px;font-size:12px;color:#79828f;max-width:88ch}
+b{color:#eef1f5}
+</style>
+<header>
+  <h1>見本25 ── Phaser で同じ島を置く</h1>
+  <p>形は見本24と同じ。<b>Phaser にしかない道具立てだけを使ってある</b> ──
+     カメラ（寄り引きと揺れ）・トゥイーン（都市が跳ねて出る／数字が伸びる）・粒の噴き出し口。</p>
+</header>
+<div id="g"></div>
+<footer>
+  <b>Phaser が持っていて、こちらが手で書いていたもの。</b>
+  カメラの寄り引きと追従／画面の揺れ／トゥイーン（跳ね・伸び）／粒の噴き出し口／
+  入力／場面の切り替え／絵の読み込み。<br>
+  <b>描く力そのものは PixiJS と同じ WebGL。</b>絵が良くなるのではなく、<b>作るのが速くなる</b>道具である。
+</footer>
+<script type="module">
+import Phaser from '/node_modules/phaser/dist/phaser.esm.js';
+
+/* ══ つまみ ══════════════════════════════════════════ */
+const K={ W:900, H:560,
+  SEA:0x2fb2d8, SEA2:0x2699c4, SAND:0xf7dc9a, GRASS:0x6ccf62, OUT:0x141b26,
+  OUT_W:9, SAND_W:16, LANE:0xffd45c,
+  POP_MS:520,            /* 都市が跳ねて出るまで */
+  COUNT_MS:1400,         /* 数字が伸びる時間 */
+  SHAKE_MS:220, SHAKE:0.006,
+  MOTES:400,             /* 噴き出し口から出る粒 */
+  ZOOM_FAR:0.72, ZOOM_NEAR:1.0, ZOOM_MS:900 };
+
+function blob(cx,cy,r,n,seed){
+  let s=seed; const R=()=>((s=s*16807%2147483647)-1)/2147483646;
+  const pts=[];
+  for(let i=0;i<n;i++){ const a=i/n*Math.PI*2, rr=r*(0.72+R()*0.5);
+    pts.push([cx+Math.cos(a)*rr, cy+Math.sin(a)*rr*0.82]); }
+  return pts;
+}
+const ISLES=[blob(260,300,110,14,777), blob(560,220,84,12,4242), blob(540,440,66,11,999)];
+const LANES=[[[260,300],[400,255],[560,220]],[[560,220],[590,340],[540,440]]];
+const CITIES=[[260,300],[560,220],[540,440],[398,350]];
+
+function pathOn(g,pts,close){
+  const m=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
+  const p0=m(pts[0],pts[1]); g.beginPath(); g.moveTo(p0[0],p0[1]);
+  for(let i=1;i<=pts.length;i++){ const c=pts[i%pts.length], nx=pts[(i+1)%pts.length], q=m(c,nx);
+    g.lineTo(c[0],c[1]); g.lineTo(q[0],q[1]); }
+  if(close) g.closePath();
+}
+
+class Sea extends Phaser.Scene{
+  create(){
+    const cam=this.cameras.main;
+    cam.setBackgroundColor(K.SEA);
+
+    /* 海の縞 */
+    const sea=this.add.graphics();
+    sea.fillStyle(K.SEA2,0.85);
+    for(let y=0;y<K.H+40;y+=34) sea.fillRect(-200,y,K.W+400,16);
+
+    /* 島 */
+    const land=this.add.graphics();
+    ISLES.forEach(p=>{
+      land.lineStyle(K.OUT_W+K.SAND_W,K.OUT,1); pathOn(land,p,true); land.strokePath();
+      land.fillStyle(K.SAND,1); pathOn(land,p,true); land.fillPath();
+      land.lineStyle(K.SAND_W,K.SAND,1); pathOn(land,p,true); land.strokePath();
+      const inner=p.map(q=>[q[0]*0.94+ (q[0]<0?0:0), q[1]]);
+      land.fillStyle(K.GRASS,1);
+      pathOn(land, p.map(([x,y])=>{
+        const cx=p.reduce((s,q)=>s+q[0],0)/p.length, cy=p.reduce((s,q)=>s+q[1],0)/p.length;
+        return [cx+(x-cx)*0.80, cy+(y-cy)*0.80];
+      }), true);
+      land.fillPath();
+    });
+
+    /* 航路 */
+    const lanes=this.add.graphics();
+    LANES.forEach(L=>{
+      lanes.lineStyle(8,K.OUT,1); lanes.beginPath(); lanes.moveTo(L[0][0],L[0][1]);
+      L.slice(1).forEach(q=>lanes.lineTo(q[0],q[1])); lanes.strokePath();
+      lanes.lineStyle(4.5,K.LANE,1); lanes.beginPath(); lanes.moveTo(L[0][0],L[0][1]);
+      L.slice(1).forEach(q=>lanes.lineTo(q[0],q[1])); lanes.strokePath();
+    });
+
+    /* 粒の噴き出し口（Phaser の道具） */
+    const px=this.textures.createCanvas('dot',12,12);
+    const c=px.getContext(); c.fillStyle='#eafcff'; c.beginPath(); c.arc(6,6,6,0,7); c.fill();
+    px.refresh();
+    this.add.particles(0,0,'dot',{
+      x:{min:0,max:K.W}, y:K.H+10, lifespan:5200, speedY:{min:-26,max:-10},
+      speedX:{min:-8,max:8}, scale:{start:0.30,end:0.02}, alpha:{start:0.55,end:0},
+      quantity:2, frequency:14, blendMode:'ADD' });
+
+    /* 都市：トゥイーンで跳ねて出る（Phaser の道具） */
+    CITIES.forEach(([x,y],i)=>{
+      const g=this.add.graphics({x,y});
+      g.fillStyle(0xfff2d6,1); g.lineStyle(3.5,K.OUT,1);
+      g.fillCircle(0,0,9); g.strokeCircle(0,0,9);
+      g.setScale(0);
+      this.tweens.add({targets:g, scale:1, ease:'Back.easeOut', duration:K.POP_MS, delay:220*i});
+    });
+
+    /* 数字が伸びる（トゥイーン） */
+    const label=this.add.text(18,16,'所持 0',
+      {fontFamily:'system-ui',fontSize:'26px',color:'#ffe9a8',fontStyle:'bold'}).setScrollFactor(0);
+    const bag={v:0};
+    this.tweens.add({targets:bag, v:3919, duration:K.COUNT_MS, ease:'Cubic.easeOut',
+      onUpdate:()=>label.setText('所持 '+Math.round(bag.v).toLocaleString())});
+
+    /* カメラ：寄り引きと揺れ（Phaser の道具） */
+    cam.setZoom(K.ZOOM_FAR);
+    cam.centerOn(K.W/2,K.H/2);
+    this.time.delayedCall(900,()=>{
+      cam.zoomTo(K.ZOOM_NEAR,K.ZOOM_MS,'Sine.easeInOut');
+      cam.pan(430,300,K.ZOOM_MS,'Sine.easeInOut');
+    });
+    this.time.delayedCall(2100,()=>cam.shake(K.SHAKE_MS,K.SHAKE));
+  }
+}
+new Phaser.Game({type:Phaser.AUTO,width:K.W,height:K.H,parent:'g',
+  backgroundColor:'#2fb2d8',scene:[Sea],antialias:true});
+</script>
