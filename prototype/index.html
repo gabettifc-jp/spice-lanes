@@ -29,7 +29,7 @@ const K = {
   TIDY_MAX: 7,                 /* 周りの陸がこれ以上なら陸にする */              /* 都市を置ける「海からの近さ」（升・港湾都市） */              /* 想定地形のふちのぼやけ（升） */
 
   /* ── 探索（決定24・27・29・38・45・50・57） ── */
-  REACH: 46,                    /* 船の探索可能距離（升） */
+  REACH: 64,                    /* 船の探索可能距離（升） */
   SCAN_R: 2.4,
   WAKE_R: 2.0,                 /* 船が通った水路の幅（升）。ここは必ず海として分かる */                  /* 一歩ごとに土地を判定する半径（升） */
   REVEAL_R: 11,                 /* 当たったとき黒が剥がれる半径（升・決定45） */
@@ -181,7 +181,7 @@ function placeCities(){
 placeCities();
 
 /* 港は中央の地域の都市を一つ（決定53） */
-const PORT=CITIES.filter(c=>c.region===1)[0];
+let PORT=CITIES.filter(c=>c.region===1)[0];
 PORT.shown=true;
 
 /* ══ 状態 ══════════════════════════════════════════════════ */
@@ -406,6 +406,15 @@ CV.addEventListener('click',e=>{
     S.newLane={lane, t0:performance.now()};
     say('繋いだ　'+sel.name+' ⇄ '+city.name+'　開く −'+cost);
     sel=null; return;
+  }
+  if(S.mode==='move'){
+    if(!city){ say('移りたい港を押す（明るい都市だけ）'); return; }
+    if(city===PORT){ say('いまここに居る'); return; }
+    if(!shareSea(PORT,city)){ say(city.name+' へは、まだ海が繋がっていない'); return; }
+    PORT=city; S.pins=[]; sel=null;
+    say('拠点を '+city.name+' に移した（一ターン使う）');
+    nextTurn();
+    return;
   }
   if(city){ say('探索の手では都市は押せない。「繋ぐ」に切り替える'); return; }
   /* ピンを置く（決定38：本数の上限なし。長さだけで縛る） */
@@ -863,7 +872,7 @@ function draw(t){
     const q=cellToPx(c.x+.5,c.y+.5);
     if(q.x<-90||q.x>W+90||q.y<-70||q.y>H+70) return;
     const r=c===PORT?9:7;
-    const linkable = S.mode!=='link' || c===sel || shareSea(sel||PORT,c);
+    const linkable = (S.mode!=='link'&&S.mode!=='move') || c===sel || c===PORT || shareSea(sel||PORT,c);
     g.save(); if(!linkable) g.globalAlpha=0.40;
     el(q.x,q.y+r*0.9,r*1.1,r*0.4,'rgba(8,34,52,.30)',0);
     g.beginPath(); g.moveTo(q.x-r,q.y+r); g.lineTo(q.x-r,q.y-r*0.2);
@@ -873,8 +882,11 @@ function draw(t){
     g.beginPath(); g.moveTo(q.x-r-1.5,q.y-r*0.2); g.lineTo(q.x,q.y-r*1.35);
     g.lineTo(q.x+r+1.5,q.y-r*0.2); g.closePath();
     g.fillStyle=C.roof; g.fill(); g.strokeStyle=K.OUT; g.lineWidth=2.6; g.stroke();
+    if(c===PORT){ el(q.x,q.y,r*2.4,r*2.4,'rgba(255,233,168,.16)',0);
+      g.beginPath(); g.arc(q.x,q.y,r*2.2,0,7);
+      g.strokeStyle='#ffe9a8'; g.lineWidth=2.4; g.setLineDash([5,4]); g.stroke(); g.setLineDash([]); }
     if(sel===c) el(q.x,q.y,r*2.1,r*2.1,'rgba(255,226,122,.28)',3);
-    if(S.mode==='link'&&!linkable){        /* 繋げない都市に、切れた鎖の印 */
+    if((S.mode==='link'||S.mode==='move')&&!linkable){  /* 繋げない都市に、切れた鎖の印 */
       g.beginPath(); g.moveTo(q.x-r*0.8,q.y-r*1.9); g.lineTo(q.x+r*0.8,q.y-r*0.9);
       g.moveTo(q.x+r*0.8,q.y-r*1.9); g.lineTo(q.x-r*0.8,q.y-r*0.9);
       g.strokeStyle='#ff8f8f'; g.lineWidth=2.6; g.stroke();
@@ -921,10 +933,11 @@ function draw(t){
   g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub;
   g.fillText('今ターンの見込み', 330, 44);
   g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub;
-  { const nm={sail:'探索',link:'繋ぐ',cut:'切る'}[S.mode];
+  { const nm={sail:'探索',link:'繋ぐ',cut:'切る',move:'拠点を移す'}[S.mode];
     const can=CITIES.filter(c=>c.shown&&c!==(sel||PORT)&&shareSea(sel||PORT,c)).length;
-    g.fillText('ターン '+S.turn+'　／　いまの手：'+nm
-      +(S.mode==='link'?'　（'+(sel?sel.name:PORT.name)+' から繋げる都市 '+can+'）':''), 470, 20); }
+    g.fillText('ターン '+S.turn+'　／　拠点：'+PORT.name+'　／　いまの手：'+nm
+      +(S.mode==='link'?'　（'+(sel?sel.name:PORT.name)+' から繋げる都市 '+can+'）':'')
+      +(S.mode==='move'?'　（移れる港 '+can+'）':''), 470, 20); }
   if(S.phase==='plan'){
     const len=polyLen(S.pins);
     g.fillStyle=len>0?'#ffe27a':C.sub;
@@ -934,23 +947,27 @@ function draw(t){
   /* ── 下のボタン ── */
   const by=H-74;
   if(S.phase==='plan'){
-    const M=[['sail','探索','#4fb8e8'],['link','繋ぐ','#6ccf62'],['cut','切る','#e2703c']];
+    const M=[['sail','探索','#4fb8e8'],['link','繋ぐ','#6ccf62'],
+             ['cut','切る','#e2703c'],['move','拠点を移す','#a97ce0']];
     M.forEach(([m,label,col],i)=>{
-      const x=W/2-330+i*112;
-      button(x,by,102,44,label,col,()=>{S.mode=m;sel=null;S.pins=m==='sail'?S.pins:[];},true);
-      if(S.mode===m){ g.beginPath(); g.roundRect(x-4,by-4,110,52,26);
+      const x=W/2-400+i*(m==='move'?0:112)+(i===3?336:0);
+      button(x,by,m==='move'?132:102,44,label,col,
+        ()=>{S.mode=m;sel=null;S.pins=m==='sail'?S.pins:[];},true);
+      if(S.mode===m){ g.beginPath(); g.roundRect(x-4,by-4,(m==='move'?140:110),52,26);
         g.strokeStyle='#fff'; g.lineWidth=3; g.stroke(); }
     });
     if(S.mode==='sail'){
-      button(W/2+20,by,150,44,'探索に出す','#f0a33c',()=>goExplore(false), S.pins.length>0);
-      button(W/2+180,by,110,44,'スキップ','#6b7686',()=>goExplore(true), true);
-      button(W/2+300,by,100,44,'ピン消す','#5b6572',()=>{S.pins=[];}, S.pins.length>0);
+      button(W/2+90,by,150,44,'探索に出す','#f0a33c',()=>goExplore(false), S.pins.length>0);
+      button(W/2+250,by,110,44,'スキップ','#6b7686',()=>goExplore(true), true);
+      button(W/2+370,by,100,44,'ピン消す','#5b6572',()=>{S.pins=[];}, S.pins.length>0);
     } else {
       g.font='12px system-ui,"Hiragino Kaku Gothic ProN",sans-serif';
       g.fillStyle='#9aa4b2'; g.textAlign='left'; g.textBaseline='middle';
       g.fillText(S.mode==='link'
         ? '明るい都市どうしを押すと繋がる。暗い都市は、まだ海が繋がっていない'
-        : '切りたい航路の線を押す。切ると育ちが消える', W/2+24, by+22);
+        : S.mode==='cut' ? '切りたい航路の線を押す。切ると育ちが消える'
+        : '移りたい港を押す。一ターン使う。次からはそこが探索の出発点になる',
+        W/2+94, by+22);
     }
   }
   if(S.phase==='result'){
@@ -1021,13 +1038,13 @@ function draw(t){
    3 いまの設定を出すボタン／4 そのまま貼れる文
    ══════════════════════════════════════════════════════ */
 const PRESETS={
-  '狭い':   {cols:64,  rows:40,  reach:30, reveal:8},
-  'ふつう': {cols:128, rows:80,  reach:46, reveal:11},
-  '広い':   {cols:180, rows:112, reach:64, reveal:14},
+  '狭い':   {cols:64,  rows:40,  reach:44, reveal:8},
+  'ふつう': {cols:128, rows:80,  reach:64, reveal:11},
+  '広い':   {cols:180, rows:112, reach:92, reveal:14},
 };
 const HINTS=[
   ['地図の広さ（cols/rows）', '広く ↔ 狭く', '64×40 〜 180×112', '広いほど探す判断が重い。狭いと全部見えてしまう'],
-  ['船の届く距離（reach）',   '長く ↔ 短く', '30 〜 64',          '長いほど一回で遠くへ。短いと刻む'],
+  ['船の届く距離（reach）',   '長く ↔ 短く', '44 〜 92',          '長いほど一回で遠くへ。短いと刻む'],
   ['剥がれる範囲（reveal）',  '広く ↔ 狭く', '6 〜 18',           '広いと地図が早く埋まる。狭いと狙って彫れる'],
   ['取り立てまで（q1/q2）',   '遅く ↔ 早く', '6/14 〜 16/30',     '遅いほど楽。早いと締め切りが濃い'],
 ];
