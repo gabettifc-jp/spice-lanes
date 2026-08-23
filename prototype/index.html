@@ -99,7 +99,7 @@ addEventListener('resize',()=>{fit();});
 fit();
 
 /* 決まった種でぶれない乱数（決定50：計算は押した瞬間に終わる） */
-let seed=20260822;
+let seed=Number(new URLSearchParams(location.search).get('seed'))||20260822;  /* ?seed= で作り直せる */
 const R=()=>((seed=seed*16807%2147483647)-1)/2147483646;
 
 /* ── 想定地形を絵で描いて、その上を確率にする（決定51） ── */
