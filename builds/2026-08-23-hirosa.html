@@ -1,0 +1,36 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>見本26 ── 地図の広さを、広い↔狭いで比べる</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0e1420;color:#eef1f5;
+  font:13px/1.6 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+header{padding:12px 18px;border-bottom:1px solid #262b35}
+h1{margin:0 0 3px;font-size:15px} header p{margin:0;font-size:12px;color:#9aa4b2}
+.row{display:flex;gap:12px;padding:12px 16px}
+figure{margin:0;flex:1}
+iframe{width:100%;height:620px;border:1px solid #262b35;border-radius:12px;background:#0e1420}
+figcaption{font-size:11.5px;color:#9aa4b2;margin-top:6px}
+b{color:#eef1f5}
+footer{padding:10px 18px 22px;font-size:12px;color:#79828f;max-width:88ch}
+</style>
+<header>
+  <h1>見本26 ── 地図の広さを、広い↔狭いで比べる（決定59）</h1>
+  <p>種は同じ。<b>ちがうのは地図の升の数と、船の届く距離だけ。</b>
+     『templates/mihon.md』の「一度に頭に置くのは二つだけ」に従う。</p>
+</header>
+<div class="row">
+  <figure>
+    <iframe src="/prototype/index.html?seed=20260822&cols=64&rows=40&reach=30"></iframe>
+    <figcaption><b>狭い</b>　64×40升／届く距離30　── 全体がすぐ見える。取り立てまでに回りきれる</figcaption>
+  </figure>
+  <figure>
+    <iframe src="/prototype/index.html?seed=20260822&cols=180&rows=112&reach=64"></iframe>
+    <figcaption><b>広い</b>　180×112升／届く距離64　── 引きで見る。どこを探すかの判断が重い</figcaption>
+  </figure>
+</div>
+<footer>
+  <b>見るところ。</b>どちらが「もう一回やりたい」になるか。<br>
+  狭いほうは<b>全部見えてしまう</b>ので、探す楽しみが薄い。
+  広いほうは<b>取り立て二回（決定47）で回りきれるか</b>が怪しい。<b>そこが釣り合いの争点。</b>
+</footer>
