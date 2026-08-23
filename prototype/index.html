@@ -75,6 +75,12 @@ const K = {
   GROW_SIZE: 0.16,             /* 一段ごとに都市が大きくなる割合 */
   WAKE_N: 12,                  /* 走る船の後ろに残る泡の数 */
   WAKE_R: 3.0,                 /* その泡の大きさ（画面の点） */
+
+  /* ── 読みやすさ（決定96） ── */
+  LABEL_GAP: 3.2,              /* 名札を都市からどれだけ離すか（都市の大きさに対する割合） */
+  LABEL_TRY: 8,                /* 重なったとき、いくつ置き場所を試すか */
+  LABEL_STEP: 26,              /* 置き場所をずらす幅（画面の点） */
+  LANE_TAG_BG: 0.72,           /* 航路の数字の座の濃さ */
   SAIL_EASE: 1,                /* 1で船の出だしと終わりがゆっくりになる */
   FLASH_MS: 1600,              /* 剥がれたところを光らせる時間 */
   FIELD_BLUR: 3,               /* 陸の海岸線をぼかす回数。多いほどなだらか */
@@ -1080,9 +1086,15 @@ function draw(t){
       const q=cellToPx(pt.x+.5,pt.y+.5);
       el(q.x,q.y,K.CARGO_R+1.6,K.CARGO_R+1.6,K.OUT,0);
       el(q.x,q.y,K.CARGO_R,K.CARGO_R,'#ffe9a8',0); }
+    /* 航路の数字は、明るい海の上だと白文字が沈む。座を敷く（決定96） */
     const mid=l.path[(l.path.length/2)|0]; const q=cellToPx(mid.x,mid.y);
-    g.font='700 11px system-ui,sans-serif'; g.fillStyle='#fff'; g.textAlign='center';
-    g.fillText('+'+Math.round(laneIncome(l))+'  '+l.age+'年', q.x, q.y-9);
+    const tag='+'+Math.round(laneIncome(l))+'　'+l.age+'年';
+    g.font='700 11px system-ui,sans-serif'; g.textAlign='center'; g.textBaseline='middle';
+    const tw=g.measureText(tag).width+14;
+    g.beginPath(); g.roundRect(q.x-tw/2, q.y-9-8, tw, 17, 9);
+    g.fillStyle='rgba(14,20,32,'+K.LANE_TAG_BG+')'; g.fill();
+    g.strokeStyle=K.OUT; g.lineWidth=1.4; g.stroke();
+    g.fillStyle='#ffe9a8'; g.fillText(tag, q.x, q.y-9);
   });
 
   /* 走っている船の航跡（演出） */
@@ -1173,24 +1185,45 @@ function draw(t){
       g.strokeStyle='#ff8f8f'; g.lineWidth=2.6; g.stroke();
     }
     g.restore();
-    if(true) LABELS.push({x:q.x,y:q.y+r*3.2,c});
+    LABELS.push({x:q.x, y:q.y+r*K.LABEL_GAP, ax:q.x, ay:q.y, c});
   });
 
-  /* 名札：先に置いたものと重なるなら出さない（がべの指摘） */
+  /* 名札：重なったら消さずに、置き場所をずらす（決定96）
+     消すと都市が名無しになり、特産品が読めない ── 引き直しの判断が立たない（決定62） */
   const placed=[];
-  LABELS.forEach(L=>{
-    const gr0=cityGrow(L.c);
-    const sub=L.c.good.name+'・'+L.c.good.eff+(gr0>0? ' ▲'+Math.round(gr0*100)+'%':'');
+  const overlap=(b)=>placed.some(o=>!(b.x+b.w<o.x||o.x+o.w<b.x||b.y+b.h<o.y||o.y+o.h<b.y));
+  const measure=(name,sub)=>{
     g.font='700 13px system-ui,"Hiragino Kaku Gothic ProN",sans-serif';
-    let tw=g.measureText(L.c.name).width;
-    g.font='11px system-ui,sans-serif'; tw=Math.max(tw,g.measureText(sub).width);
-    const wpx=tw+22, box={x:L.x-wpx/2, y:L.y-19, w:wpx, h:38};
-    const hit=placed.some(b=>!(box.x+box.w<b.x||b.x+b.w<box.x||box.y+box.h<b.y||b.y+b.h<box.y));
-    if(hit) return;
-    placed.push(box);
-    { const gr=cityGrow(L.c);
-      plate(L.x,L.y,L.c.name, L.c.good.name+'・'+L.c.good.eff
-        + (gr>0? ' ▲'+Math.round(gr*100)+'%' : '')); }
+    let tw=g.measureText(name).width;
+    if(sub){ g.font='11px system-ui,sans-serif'; tw=Math.max(tw,g.measureText(sub).width); }
+    return {w:tw+22, h:sub?38:26}; };
+  LABELS.forEach(L=>{
+    const gr=cityGrow(L.c);
+    const full=L.c.good.name+'・'+L.c.good.eff+(gr>0? ' ▲'+Math.round(gr*100)+'%':'');
+    /* 置き場所を、都市のまわりに順に試す。下 → 上 → 右 → 左 → さらに外へ */
+    const around=[];
+    for(let k=0;k<K.LABEL_TRY;k++){
+      const ring=1+Math.floor(k/4), d=K.LABEL_STEP*ring;
+      const dir=k%4;
+      around.push({x:L.ax+(dir===2?d*2.2:dir===3?-d*2.2:0),
+                   y:L.ay+(dir===0?d+(L.y-L.ay):dir===1?-(d+(L.y-L.ay)):(L.y-L.ay))});
+    }
+    for(const sub of [full, null]){          /* 入らなければ、名前だけの小さい札にする */
+      const m=measure(L.c.name,sub);
+      for(const pos of around){
+        const box={x:pos.x-m.w/2, y:pos.y-m.h/2, w:m.w, h:m.h};
+        if(overlap(box)) continue;
+        placed.push(box);
+        /* 都市から離れたときは、どの都市の札か分かるように引き出し線を引く */
+        if(Math.hypot(pos.x-L.ax,pos.y-L.ay)>K.LABEL_STEP*1.6){
+          g.beginPath(); g.moveTo(L.ax,L.ay); g.lineTo(pos.x,pos.y);
+          g.strokeStyle='rgba(255,255,255,.34)'; g.lineWidth=1.6; g.stroke(); }
+        plate(pos.x,pos.y,L.c.name,sub);
+        return;
+      }
+    }
+    /* どこにも入らなかったときだけ、名前だけを小さく置く */
+    plate(L.x,L.y,L.c.name,null);
   });
 
   /* 船は港に置く */
@@ -1224,10 +1257,11 @@ function draw(t){
     g.save(); g.globalAlpha=a; g.textAlign='left'; g.textBaseline='middle';
     g.font='700 15px system-ui,sans-serif';
     const txt=(pp.v>=0?'+':'−')+Math.abs(pp.v).toLocaleString();
+    const tw=g.measureText(txt).width;          /* 幅は、その文字の大きさのままで測る */
     g.fillStyle=pp.v>=0?'#8ef29a':'#ff9d9d';
     g.fillText(txt, 18, y);
     if(pp.label){ g.font='10px system-ui,sans-serif'; g.fillStyle=C.sub;
-      g.fillText(pp.label, 18+g.measureText(txt).width+8, y+1); }
+      g.fillText(pp.label, 18+tw+9, y+1); }
     g.restore();
   });
   const q=K.QUOTAS[Math.min(S.quotaIx,K.QUOTAS.length-1)];
