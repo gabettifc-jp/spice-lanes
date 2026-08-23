@@ -475,22 +475,38 @@ function applyResult(res){
 
 /* ══ 繋ぐ：開いた海だけを通る自動経路（決定33） ══════════ */
 function seaPath(a,b){
-  const q=[pi(a.x,a.y)], prev=new Int32Array(K.COLS*K.ROWS).fill(-1);
-  prev[pi(a.x,a.y)]=-2; const goal=pi(b.x,b.y);
-  const ok=i=>ST[i]===1 || i===goal;
-  for(let h=0;h<q.length;h++){
-    const cur=q[h]; if(cur===goal) break;
+  /* 都市が「海に面している」の意味を、繋がりの表示（shareSea）と揃える。
+     決定36 で都市は海から COAST_REACH 升まで離れて置けるので、
+     都市の升の真隣に海が無いことがある。そこで、
+     出発も到着も「都市から COAST_REACH 升のうちの海」から始める／で終わる。
+     ここが真隣だけだったので、繋がって見えるのに繋げなかった（決定90） */
+  const N=K.COLS*K.ROWS, prev=new Int32Array(N).fill(-1), q=[];
+  const near=(c)=>{ const out=[];
+    for(let dy=-K.COAST_REACH;dy<=K.COAST_REACH;dy++)
+    for(let dx=-K.COAST_REACH;dx<=K.COAST_REACH;dx++){
+      const nx=c.x+dx, ny=c.y+dy; if(nx<0||ny<0||nx>=K.COLS||ny>=K.ROWS) continue;
+      const i=pi(nx,ny); if(ST[i]===1) out.push(i); }
+    return out; };
+  for(const i of near(a)) if(prev[i]===-1){ prev[i]=-2; q.push(i); }
+  if(!q.length) return null;
+  const goals=new Set(near(b));
+  if(!goals.size) return null;
+  let hit=-1;
+  for(let h=0;h<q.length && hit<0;h++){
+    const cur=q[h]; if(goals.has(cur)){ hit=cur; break; }
     const x=cur%K.COLS, y=(cur/K.COLS)|0;
     for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]){
       const nx=x+dx, ny=y+dy; if(nx<0||ny<0||nx>=K.COLS||ny>=K.ROWS) continue;
-      const ni=pi(nx,ny); if(prev[ni]!==-1) continue; if(!ok(ni)) continue;
+      const ni=pi(nx,ny); if(prev[ni]!==-1) continue; if(ST[ni]!==1) continue;
       prev[ni]=cur; q.push(ni);
-    }
+      if(goals.has(ni)){ hit=ni; break; } }
   }
-  if(prev[goal]===-1) return null;
-  const path=[]; let c=goal;
-  while(c>=0){ path.push({x:c%K.COLS,y:(c/K.COLS)|0}); c=prev[c]; if(prev[c]===-2){path.push({x:a.x,y:a.y});break;} }
-  path.reverse();
+  if(hit<0) return null;
+  const mid=[]; let c=hit;
+  while(c>=0 && prev[c]!==-2){ mid.push({x:c%K.COLS,y:(c/K.COLS)|0}); c=prev[c]; }
+  if(c>=0) mid.push({x:c%K.COLS,y:(c/K.COLS)|0});
+  mid.reverse();
+  const path=[{x:a.x,y:a.y}, ...mid, {x:b.x,y:b.y}];
   let L=0; for(let i=1;i<path.length;i++) L+=Math.hypot(path[i].x-path[i-1].x,path[i].y-path[i-1].y);
   return {path,len:L};
 }
