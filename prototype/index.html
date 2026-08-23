@@ -35,6 +35,9 @@ const K = {
   REVEAL_R: 11,                 /* 当たったとき黒が剥がれる半径（升・決定45） */
   START_R: 9,                   /* 最初に見えている半径（決定53） */
   EXPLORE_COST: 14,             /* 探索の費用／一升（決定27） */
+  ROUTE_STEP: 0.5,              /* 道を細かく刻む間隔（升・決定89） */
+  HARBOUR_SLACK: 1.0,           /* 港を出る口の広さ（升）。近い水から順にこの分だけ口にする */
+  PIN_REFINE: 6,                /* ピンを上限まで詰め直す回数（決定89） */
 
   /* ── 航路（決定33・34・69・71・73） ── */
   OPEN_COST: 8,                /* 航路を開く一括／一升（決定34） */
@@ -196,6 +199,7 @@ const S={
   camX:0, camY:0, sail:null, flash:null,
   msg:'', msgT:0, mode:'link', cuts:0, newLane:null, showSea:null,
   undo:null,               /* 引き直し用（探索を乗せる前の升と都市） */
+  route:null,              /* 陸を避けた道（決定89） */
 };
 
 function revealCircle(cx,cy,r,forceSea){
@@ -210,21 +214,182 @@ revealCircle(PORT.x,PORT.y,K.START_R,false);
 ST[pi(PORT.x,PORT.y)]=2;
 
 /* ══ 探索：計算は押した瞬間に全部終わる（決定50） ══════════ */
-function polyPoints(pins){
-  const pts=[{x:PORT.x,y:PORT.y},...pins,{x:PORT.x,y:PORT.y}];
-  const out=[]; 
-  for(let i=0;i<pts.length-1;i++){
-    const a=pts[i],b=pts[i+1], d=Math.hypot(b.x-a.x,b.y-a.y), n=Math.max(1,Math.ceil(d*2));
-    for(let s=0;s<n;s++) out.push({x:a.x+(b.x-a.x)*s/n, y:a.y+(b.y-a.y)*s/n});
+
+/* ══ 陸を避けて引く道（決定89） ══════════════════════════════
+   避けるのは「見えている陸」だけ。まだ知らない升は通れる ──
+   知らない陸は避けようがない。走ってみて当たったら、そこで引き返す（決定57） */
+const DIRS8=[[1,0,1],[-1,0,1],[0,1,1],[0,-1,1],
+             [1,1,Math.SQRT2],[1,-1,Math.SQRT2],[-1,1,Math.SQRT2],[-1,-1,Math.SQRT2]];
+
+function hpush(h,k,v){ h.push(k,v); let i=(h.length>>1)-1;
+  while(i>0){ const q=(i-1)>>1; if(h[q<<1]<=h[i<<1]) break;
+    const a=h[q<<1],b=h[(q<<1)+1]; h[q<<1]=h[i<<1]; h[(q<<1)+1]=h[(i<<1)+1];
+    h[i<<1]=a; h[(i<<1)+1]=b; i=q; } }
+function hpop(h){ const k=h[0], v=h[1], lv=h.pop(), lk=h.pop();
+  if(h.length){ h[0]=lk; h[1]=lv; let i=0;
+    for(;;){ const l=(i<<1)+1, r=l+1; let m=i;
+      if((l<<1)<h.length && h[l<<1]<h[m<<1]) m=l;
+      if((r<<1)<h.length && h[r<<1]<h[m<<1]) m=r;
+      if(m===i) break;
+      const a=h[m<<1],b=h[(m<<1)+1]; h[m<<1]=h[i<<1]; h[(m<<1)+1]=h[(i<<1)+1];
+      h[i<<1]=a; h[(i<<1)+1]=b; i=m; } }
+  return [k,v]; }
+
+/* ある点から、見えている陸を避けたときの「道のり」を全升ぶん出す */
+function distField(sx,sy){
+  /* 64ビットで持つ。32ビットだと丸めの誤差（およそ 1e-5）が
+     下の 1e-9 より大きく、同じ升を何度も繋ぎ直して終わらなくなる */
+  const n=K.COLS*K.ROWS, d=new Float64Array(n).fill(Infinity),
+        prev=new Int32Array(n).fill(-1), h=[];
+  const ix=Math.round(sx), iy=Math.round(sy), i0=pi(ix,iy);
+  if(ST[i0]!==2){ d[i0]=0; prev[i0]=-2; hpush(h,0,i0); }
+  else {
+    /* 出発が港（陸）のとき、船は入江に居る。
+       ただし口を広く取ると、港のまわりの陸をまたいで出られてしまう。
+       いちばん近い水から HARBOUR_SLACK 升ぶんだけを口にする（決定89） */
+    const R0=K.COAST_REACH+2, cand=[];
+    let dmin=Infinity;
+    for(let dy=-R0;dy<=R0;dy++) for(let dx=-R0;dx<=R0;dx++){
+      const x=ix+dx, y=iy+dy;
+      if(x<0||y<0||x>=K.COLS||y>=K.ROWS) continue;
+      const i=pi(x,y); if(ST[i]===2) continue;
+      const w=Math.hypot(x-sx,y-sy); if(w>R0) continue;
+      cand.push([w,i]); if(w<dmin) dmin=w; }
+    for(const [w,i] of cand){
+      if(w>dmin+K.HARBOUR_SLACK) continue;
+      if(w<d[i]){ d[i]=w; prev[i]=-2; hpush(h,w,i); } }
   }
-  out.push({x:PORT.x,y:PORT.y});
+  while(h.length){ const [k,cur]=hpop(h); if(k>d[cur]+1e-9) continue;
+    const x=cur%K.COLS, y=(cur/K.COLS)|0;
+    for(const [dx,dy,w] of DIRS8){
+      const nx=x+dx, ny=y+dy; if(nx<0||ny<0||nx>=K.COLS||ny>=K.ROWS) continue;
+      const ni=pi(nx,ny); if(ST[ni]===2) continue;
+      const nk=k+w; if(nk<d[ni]-1e-9){ d[ni]=nk; prev[ni]=cur; hpush(h,nk,ni); } } }
+  return {d,prev};
+}
+
+/* 二点のあいだが陸に遮られていないか（道をまっすぐに伸ばすため） */
+function losClear(a,b){
+  const dd=Math.hypot(b.x-a.x,b.y-a.y), n=Math.max(1,Math.ceil(dd/K.ROUTE_STEP));
+  for(let i=0;i<=n;i++){
+    const x=Math.round(a.x+(b.x-a.x)*i/n), y=Math.round(a.y+(b.y-a.y)*i/n);
+    if(x<0||y<0||x>=K.COLS||y>=K.ROWS) return false;
+    if(ST[pi(x,y)]===2) return false; }
+  return true;
+}
+/* 折れ曲がりを減らす。見通せるところは、まっすぐ繋ぐ。
+   先へ伸ばせなくなったところで折る（後ろから探すと、長い道で二乗に効いて重い） */
+function straighten(pts){
+  if(pts.length<3) return pts;
+  const out=[pts[0]]; let i=0;
+  while(i<pts.length-1){
+    let j=i+1;
+    while(j+1<pts.length && losClear(pts[i],pts[j+1])) j++;
+    out.push(pts[j]); i=j; }
   return out;
 }
-function polyLen(pins){
-  const pts=[{x:PORT.x,y:PORT.y},...pins,{x:PORT.x,y:PORT.y}];
-  let L=0; for(let i=0;i<pts.length-1;i++) L+=Math.hypot(pts[i+1].x-pts[i].x,pts[i+1].y-pts[i].y);
-  return L;
+
+/* from から to へ、陸を避けた一区間。to に届かなければ、行けるうちで to にいちばん近いところまで */
+function routeSeg(from,to){
+  const f=distField(from.x,from.y);
+  let ti=pi(Math.round(to.x),Math.round(to.y));
+  let exact=true;
+  if(!isFinite(f.d[ti])){
+    exact=false; let bd=1e18; ti=-1;
+    for(let i=0;i<f.d.length;i++){ if(!isFinite(f.d[i])) continue;
+      const dx=(i%K.COLS)-to.x, dy=((i/K.COLS)|0)-to.y, q=dx*dx+dy*dy;
+      if(q<bd){ bd=q; ti=i; } }
+    if(ti<0) return null;
+  }
+  const back=[]; let cur=ti;
+  for(let guard=0; cur>=0 && f.prev[cur]!==-2 && guard<K.COLS*K.ROWS; guard++){
+    back.push({x:cur%K.COLS, y:(cur/K.COLS)|0}); cur=f.prev[cur]; }
+  if(cur>=0) back.push({x:cur%K.COLS, y:(cur/K.COLS)|0});
+  back.reverse();
+  const pts=[{x:from.x,y:from.y}, ...back];
+  const tail=pts[pts.length-1];
+  /* 港の升は陸なので道は入江の手前で止まる。入江まで来ていれば、そのまま着ける */
+  if(exact || Math.hypot(tail.x-to.x,tail.y-to.y)<=K.COAST_REACH+2) pts.push({x:to.x,y:to.y});
+  return straighten(pts);
 }
+
+/* 点列を細かく刻む（一歩ごとの土地判定に使う） */
+function densify(pts){
+  const out=[];
+  for(let i=0;i<pts.length-1;i++){
+    const a=pts[i],b=pts[i+1], d=Math.hypot(b.x-a.x,b.y-a.y),
+          n=Math.max(1,Math.ceil(d/K.ROUTE_STEP));
+    for(let k=0;k<n;k++) out.push({x:a.x+(b.x-a.x)*k/n, y:a.y+(b.y-a.y)*k/n}); }
+  if(pts.length) out.push(pts[pts.length-1]);
+  return out;
+}
+function ptsLen(pts){ let L=0;
+  for(let i=1;i<pts.length;i++) L+=Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y);
+  return L; }
+
+/* ピン列を、行きの道と、港へ戻るまでの道に組み立てる */
+function buildRoute(pins){
+  const port={x:PORT.x,y:PORT.y};
+  let open=[port];
+  for(const p of pins){
+    const seg=routeSeg(open[open.length-1], p);
+    if(!seg) return null;
+    open=open.concat(seg.slice(1)); }
+  const home=routeSeg(open[open.length-1], port);
+  const full=home? open.concat(home.slice(1)) : open.slice();
+  return {open, full, lenOpen:ptsLen(open), lenFull:ptsLen(full)};
+}
+let DPORT=null, dportKey=null, stVer=0;   /* 拠点からの道のり。帰り道の長さを一瞬で引くため */
+function recalcRoute(){
+  const key=PORT.name+'/'+stVer;
+  if(key!==dportKey){ DPORT=distField(PORT.x,PORT.y); dportKey=key; }
+  S.route=buildRoute(S.pins);
+}
+function routePoints(pins){ const r=buildRoute(pins); return r? densify(r.full) : [{x:PORT.x,y:PORT.y}]; }
+
+/* 帰り道の長さ。
+   升の道のりは斜めの刻みのぶん長く出るので、それだけを使うと限界の手前で止まる。
+   DPORT に残した道をたどって、まっすぐに直してから測る（新しく場を作らないので速い） */
+function backLen(q){
+  /* まっすぐに直した道は、升の道が通っていない升の上も通る（港の升や、斜めの隙間）。
+     その升に道が無いときは、すぐ近くで道が届いている升から辿る */
+  const ix=Math.round(q.x), iy=Math.round(q.y);
+  let i0=-1, bd=Infinity;
+  for(let dy=-2;dy<=2;dy++) for(let dx=-2;dx<=2;dx++){
+    const x=ix+dx, y=iy+dy; if(x<0||y<0||x>=K.COLS||y>=K.ROWS) continue;
+    const i=pi(x,y); if(!isFinite(DPORT.d[i])) continue;
+    const v=DPORT.d[i]+Math.hypot(x-q.x,y-q.y);
+    if(v<bd){ bd=v; i0=i; } }
+  if(i0<0) return Infinity;
+  const path=[{x:q.x,y:q.y}]; let cur=i0;
+  for(let g=0; cur>=0 && DPORT.prev[cur]!==-2 && g<K.COLS*K.ROWS; g++){
+    path.push({x:cur%K.COLS,y:(cur/K.COLS)|0}); cur=DPORT.prev[cur]; }
+  if(cur>=0) path.push({x:cur%K.COLS,y:(cur/K.COLS)|0});
+  path.push({x:PORT.x,y:PORT.y});
+  return ptsLen(straighten(path));
+}
+
+/* ピンを置く。届かないところを押したら、届く限界まで進んだところに立つ（決定89） */
+function tryPin(cell){
+  if(!S.route) recalcRoute();
+  const from = S.pins.length? S.pins[S.pins.length-1] : {x:PORT.x,y:PORT.y};
+  const base = S.route? S.route.lenOpen : 0;
+  const seg = routeSeg(from, cell);
+  if(!seg || seg.length<2){ say('そこへ行く道が無い'); return; }
+  const pts=densify(seg), acc=[0];
+  for(let i=1;i<pts.length;i++)
+    acc.push(acc[i-1]+Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y));
+  const fits=i=>{ const h=backLen(pts[i]); return isFinite(h) && base+acc[i]+h<=K.REACH; };
+  if(!fits(1)){ say('もう届かない（上限 '+K.REACH+'）'); return; }
+  /* 上限に当たる位置を二分で挟む。押した先まで届くならそこに立てる */
+  let lo=1, hi=pts.length-1;
+  if(fits(hi)) lo=hi;
+  else for(let k=0;k<K.PIN_REFINE && hi-lo>1;k++){
+    const mid=(lo+hi)>>1; if(fits(mid)) lo=mid; else hi=mid; }
+  S.pins.push({x:pts[lo].x,y:pts[lo].y});
+  recalcRoute();
+}
+
 function scoutMul(){                       /* 星図＝探検に効く（繋がっているときだけ・決定16） */
   let m=1; for(const l of S.lanes){ for(const c of [l.a,l.b])
     if(c.good.kind==='scout') m=Math.min(m,1-c.good.n); }
@@ -233,7 +398,7 @@ function scoutMul(){                       /* 星図＝探検に効く（繋が�
 function exploreCost(len){ return Math.round(len*K.EXPLORE_COST*scoutMul()); }
 
 function runExplore(pins){
-  const pts=polyPoints(pins);
+  const pts=routePoints(pins);
   let ran=0, hit=null, ranPath=null;
   for(let i=1;i<pts.length;i++){
     ran+=Math.hypot(pts[i].x-pts[i-1].x,pts[i].y-pts[i-1].y);
@@ -276,7 +441,7 @@ function applyResult(res){
   S.undo={st:ST.slice(), shown:CITIES.map(c=>c.shown)};
   /* 船が通った水路は、必ず海として分かる（がべ：海に繋がっていませんが出まくる）
      ここを剥がしていなかったので、港の海と発見先の海が別の水たまりになっていた */
-  (res.path && res.path.length ? res.path : polyPoints(res.pins))
+  (res.path && res.path.length ? res.path : routePoints(res.pins))
     .forEach(p=>revealCircle(Math.round(p.x),Math.round(p.y),K.WAKE_R,true));
   if(res.hit) revealCircle(res.hit.x,res.hit.y,K.REVEAL_R,false);
   const found=[];
@@ -304,7 +469,7 @@ function applyResult(res){
       }
     }
     c.shown=true; found.push(c); });
-  tidy(); dirty=true;
+  tidy(); dirty=true; stVer++; recalcRoute();
   res.found=found; res.applied=true;
 }
 
@@ -418,18 +583,16 @@ CV.addEventListener('click',e=>{
     if(!city){ say('移りたい港を押す（明るい都市だけ）'); return; }
     if(city===PORT){ say('いまここに居る'); return; }
     if(!shareSea(PORT,city)){ say(city.name+' へは、まだ海が繋がっていない'); return; }
-    PORT=city; S.pins=[]; sel=null;
+    PORT=city; S.pins=[]; sel=null; recalcRoute();
     say('拠点を '+city.name+' に移した（一ターン使う）');
     nextTurn();
     return;
   }
   if(city){ say('探索の手では都市は押せない。「繋ぐ」に切り替える'); return; }
-  /* ピンを置く（決定38：本数の上限なし。長さだけで縛る） */
-  const trial=[...S.pins,{x:cell.x,y:cell.y}];
-  if(polyLen(trial)>K.REACH){ say('届かない（上限 '+K.REACH+'）'); return; }
-  S.pins=trial;
+  /* ピンを置く（決定38：本数の上限なし。長さだけで縛る／決定89：陸を避け、届く限界で止まる） */
+  tryPin(cell);
 });
-CV.addEventListener('contextmenu',e=>{ e.preventDefault(); S.pins.pop(); });
+CV.addEventListener('contextmenu',e=>{ e.preventDefault(); S.pins.pop(); recalcRoute(); });
 
 
 
@@ -457,7 +620,7 @@ function undoResult(){                         /* 決定87：引き直したら�
   if(!S.undo) return;
   ST.set(S.undo.st);
   CITIES.forEach((c,i)=>{ c.shown=S.undo.shown[i]; });
-  S.undo=null; S.flash=null; dirty=true;
+  S.undo=null; S.flash=null; dirty=true; stVer++; recalcRoute();
 }
 function reroll(){                            /* 決定61：走った分だけもう一度払う */
   const res=runExplore(S.lastRun);
@@ -470,7 +633,7 @@ function nextTurn(){                          /* 決定60：次に進むと確�
   S.gold+=Math.round(totalIncome());          /* 決定67：金が動くのはここ */
   S.lanes.forEach(l=>l.age++);
   S.pins=[]; S.result=null; S.cuts=0; S.turn++; S.phase='plan';
-  S.undo=null;                                /* 決定60：次に進むと確定。もう戻せない */
+  S.undo=null; recalcRoute();                                /* 決定60：次に進むと確定。もう戻せない */
   /* 決定39：取り立てはターンの頭、収入が入った直後 */
   if(S.quotaIx<K.QUOTAS.length && S.turn>K.QUOTA_TURNS[S.quotaIx]){
     if(S.gold>=K.QUOTAS[S.quotaIx]){ S.gold-=K.QUOTAS[S.quotaIx]; S.quotaIx++;
@@ -885,8 +1048,8 @@ function draw(t){
   }
 
   /* 探索の線 */
-  if(S.phase==='plan' && S.pins.length){
-    const pts=[{x:PORT.x,y:PORT.y},...S.pins,{x:PORT.x,y:PORT.y}];
+  if(S.phase==='plan' && S.pins.length && S.route){
+    const pts=S.route.full;                       /* 決定89：陸を避けた道をそのままなぞる */
     g.beginPath(); pts.forEach((p,i)=>{ const q=cellToPx(p.x,p.y);
       i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y); });
     g.strokeStyle=K.OUT; g.lineWidth=6; g.setLineDash([10,7]); g.stroke();
@@ -967,7 +1130,7 @@ function draw(t){
       +(S.mode==='link'?'　（'+(sel?sel.name:PORT.name)+' から繋げる都市 '+can+'）':'')
       +(S.mode==='move'?'　（移れる港 '+can+'）':''), 470, 20); }
   if(S.phase==='plan'){
-    const len=polyLen(S.pins);
+    const len=S.route?S.route.lenFull:0;
     g.fillStyle=len>0?'#ffe27a':C.sub;
     g.fillText('探索：長さ '+len.toFixed(1)+' ／ '+K.REACH+'　見込みの費用 '+exploreCost(len), 470, 40);
   }
@@ -980,14 +1143,14 @@ function draw(t){
     M.forEach(([m,label,col],i)=>{
       const x=W/2-400+i*(m==='move'?0:112)+(i===3?336:0);
       button(x,by,m==='move'?132:102,44,label,col,
-        ()=>{S.mode=m;sel=null;S.pins=m==='sail'?S.pins:[];},true);
+        ()=>{S.mode=m;sel=null;S.pins=m==='sail'?S.pins:[];recalcRoute();},true);
       if(S.mode===m){ g.beginPath(); g.roundRect(x-4,by-4,(m==='move'?140:110),52,26);
         g.strokeStyle='#fff'; g.lineWidth=3; g.stroke(); }
     });
     if(S.mode==='sail'){
       button(W/2+90,by,150,44,'探索に出す','#f0a33c',()=>goExplore(false), S.pins.length>0);
       button(W/2+250,by,110,44,'スキップ','#6b7686',()=>goExplore(true), true);
-      button(W/2+370,by,100,44,'ピン消す','#5b6572',()=>{S.pins=[];}, S.pins.length>0);
+      button(W/2+370,by,100,44,'ピン消す','#5b6572',()=>{S.pins=[];recalcRoute();}, S.pins.length>0);
     } else {
       g.font='12px system-ui,"Hiragino Kaku Gothic ProN",sans-serif';
       g.fillStyle='#9aa4b2'; g.textAlign='left'; g.textBaseline='middle';
@@ -1150,6 +1313,7 @@ function buildUI(){
   document.body.appendChild(tog); document.body.appendChild(box);
 }
 buildUI();
+recalcRoute();          /* 決定89：はじめに拠点からの道のりを作っておく */
 
 let t0=null, lastT=0;
 function loop(ts){ if(t0===null)t0=ts; draw((ts-t0)/1000); requestAnimationFrame(loop); }
