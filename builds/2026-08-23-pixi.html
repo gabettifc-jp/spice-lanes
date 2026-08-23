@@ -1,0 +1,169 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>見本24 ── Canvas 2D と PixiJS を並べる</title>
+<style>
+*{box-sizing:border-box}
+body{margin:0;background:#0e1420;color:#eef1f5;
+  font:13px/1.6 system-ui,-apple-system,"Hiragino Kaku Gothic ProN","Noto Sans JP",sans-serif}
+header{padding:12px 18px;border-bottom:1px solid #262b35}
+h1{margin:0 0 3px;font-size:15px} header p{margin:0;font-size:12px;color:#9aa4b2}
+.row{display:flex;gap:14px;padding:14px 18px;flex-wrap:wrap}
+figure{margin:0}
+figcaption{font-size:11px;color:#79828f;margin-top:6px}
+canvas{display:block;border:1px solid #262b35;border-radius:12px}
+footer{padding:12px 18px 24px;font-size:12px;color:#79828f;max-width:88ch}
+b{color:#eef1f5}
+</style>
+<header>
+  <h1>見本24 ── 同じ絵を Canvas 2D と PixiJS で</h1>
+  <p>左＝いまの道具。右＝PixiJS（WebGL）。<b>右にだけ、Canvas 2D にできないものを入れてある</b>
+     ── 画面全体の色調・光のにじみ・海の揺らぎ・粒を1200個。</p>
+</header>
+<div class="row">
+  <figure><canvas id="a" width="620" height="560"></canvas><figcaption>Canvas 2D（いま）</figcaption></figure>
+  <figure><div id="b"></div><figcaption>PixiJS（WebGL・フィルタと粒つき）</figcaption></figure>
+</div>
+<footer>
+  <b>比べるところ。</b>形は同じ。ちがうのは<b>面の上に乗っているもの</b>と<b>粒の数</b>。<br>
+  Canvas 2D は50個くらいまで、PixiJS は1000個以上を60fpsで動かせる（<b>references/engines-2d.md</b>）。
+</footer>
+<script type="importmap">
+{"imports":{"pixi.js":"/node_modules/pixi.js/dist/pixi.mjs"}}
+</script>
+<script type="module">
+import * as PIXI from 'pixi.js';
+import { GlowFilter } from '/node_modules/pixi-filters/dist/pixi-filters.mjs';
+
+/* ══ つまみ ══════════════════════════════════════════ */
+const K = {
+  W:620, H:560,
+  SEA:0x2fb2d8, SEA2:0x2699c4, SAND:0xf7dc9a, GRASS:0x6ccf62, OUT:0x141b26,
+  OUT_W:9, SAND_W:16,
+  MOTES:1200,            /* 粒の数。Canvas 2D では出せない数 */
+  GLOW:2.2,              /* 航路のにじみ */
+  SAT:1.18, BRI:1.04,    /* 画面全体の色調 */
+  WAVE_AMP:9, WAVE_HZ:0.5,
+};
+
+/* ── 島の形（左右で同じものを使う） ── */
+function blob(cx,cy,r,n,seed){
+  let s=seed; const R=()=>((s=s*16807%2147483647)-1)/2147483646;
+  const pts=[];
+  for(let i=0;i<n;i++){ const a=i/n*Math.PI*2, rr=r*(0.72+R()*0.5);
+    pts.push([cx+Math.cos(a)*rr, cy+Math.sin(a)*rr*0.82]); }
+  return pts;
+}
+const ISLES=[blob(180,250,110,14,777), blob(430,190,84,12,4242), blob(410,410,66,11,999)];
+const LANES=[[[180,250],[300,215],[430,190]],[[430,190],[455,300],[410,410]]];
+const CITIES=[[180,250],[430,190],[410,410],[268,300]];
+
+/* ══ 左：Canvas 2D ══════════════════════════════════ */
+const ca=document.getElementById('a').getContext('2d');
+function smooth(ctx,pts){
+  ctx.beginPath();
+  const m=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
+  let p0=m(pts[0],pts[1]); ctx.moveTo(p0[0],p0[1]);
+  for(let i=1;i<=pts.length;i++){ const c=pts[i%pts.length], nx=pts[(i+1)%pts.length], q=m(c,nx);
+    ctx.quadraticCurveTo(c[0],c[1],q[0],q[1]); }
+  ctx.closePath();
+}
+const hex=v=>'#'+v.toString(16).padStart(6,'0');
+function drawA(t){
+  ca.fillStyle=hex(K.SEA); ca.fillRect(0,0,K.W,K.H);
+  ca.fillStyle=hex(K.SEA2);
+  for(let y=0;y<K.H;y+=34) ca.fillRect(0,y+Math.sin(t*.5+y*.02)*2,K.W,16);
+  ca.lineJoin='round'; ca.lineCap='round';
+  ISLES.forEach(p=>{ smooth(ca,p);
+    ca.strokeStyle=hex(K.OUT); ca.lineWidth=K.OUT_W+K.SAND_W; ca.stroke();
+    ca.strokeStyle=hex(K.SAND); ca.lineWidth=K.SAND_W; ca.stroke();
+    ca.fillStyle=hex(K.SAND); ca.fill();
+    ca.save(); ca.clip(); ca.fillStyle=hex(K.GRASS);
+    ca.beginPath(); smooth(ca,p.map(q=>[q[0],q[1]])); ca.fill(); ca.restore(); });
+  ISLES.forEach(p=>{ ca.save(); smooth(ca,p); ca.clip();
+    smooth(ca,p); ca.strokeStyle=hex(K.SAND); ca.lineWidth=K.SAND_W*1.6; ca.stroke();
+    ca.restore(); });
+  LANES.forEach(L=>{ ca.beginPath(); L.forEach((q,i)=>i?ca.lineTo(q[0],q[1]):ca.moveTo(q[0],q[1]));
+    ca.strokeStyle=hex(K.OUT); ca.lineWidth=8; ca.stroke();
+    ca.strokeStyle='#ffd45c'; ca.lineWidth=4.5; ca.stroke(); });
+  CITIES.forEach(([x,y])=>{ ca.beginPath(); ca.arc(x,y,9,0,7);
+    ca.fillStyle='#fff2d6'; ca.fill(); ca.strokeStyle=hex(K.OUT); ca.lineWidth=3.5; ca.stroke(); });
+}
+
+/* ══ 右：PixiJS ═════════════════════════════════════ */
+const app=new PIXI.Application();
+await app.init({width:K.W,height:K.H,backgroundColor:K.SEA,antialias:true});
+document.getElementById('b').appendChild(app.canvas);
+app.canvas.style.borderRadius='12px'; app.canvas.style.border='1px solid #262b35';
+
+const world=new PIXI.Container(); app.stage.addChild(world);
+
+/* 海の縞（揺らす） */
+const sea=new PIXI.Graphics(); world.addChild(sea);
+
+/* 島 */
+const land=new PIXI.Graphics(); world.addChild(land);
+function pathOn(gfx,pts){
+  const m=(a,b)=>[(a[0]+b[0])/2,(a[1]+b[1])/2];
+  const p0=m(pts[0],pts[1]); gfx.moveTo(p0[0],p0[1]);
+  for(let i=1;i<=pts.length;i++){ const c=pts[i%pts.length], nx=pts[(i+1)%pts.length], q=m(c,nx);
+    gfx.quadraticCurveTo(c[0],c[1],q[0],q[1]); }
+  gfx.closePath();
+}
+ISLES.forEach(p=>{
+  pathOn(land,p); land.stroke({color:K.OUT,width:K.OUT_W+K.SAND_W,join:'round'});
+  pathOn(land,p); land.stroke({color:K.SAND,width:K.SAND_W,join:'round'});
+  pathOn(land,p); land.fill(K.SAND);
+});
+const grass=new PIXI.Graphics(); world.addChild(grass);
+ISLES.forEach(p=>{ pathOn(grass,p.map(q=>[q[0],q[1]])); grass.fill(K.GRASS); });
+grass.scale.set(0.90); grass.position.set(K.W*0.05,K.H*0.05);
+
+/* 航路：にじませる（Canvas 2D にはできない） */
+const lanes=new PIXI.Graphics(); world.addChild(lanes);
+LANES.forEach(L=>{ lanes.moveTo(L[0][0],L[0][1]); L.slice(1).forEach(q=>lanes.lineTo(q[0],q[1]));
+  lanes.stroke({color:K.OUT,width:8,join:'round',cap:'round'});
+  lanes.moveTo(L[0][0],L[0][1]); L.slice(1).forEach(q=>lanes.lineTo(q[0],q[1]));
+  lanes.stroke({color:0xffd45c,width:4.5,join:'round',cap:'round'}); });
+lanes.filters=[new GlowFilter({distance:14,outerStrength:K.GLOW,color:0xffd45c,quality:0.4})];
+
+/* 都市 */
+const cities=new PIXI.Graphics(); world.addChild(cities);
+CITIES.forEach(([x,y])=>{ cities.circle(x,y,9).fill(0xfff2d6).stroke({color:K.OUT,width:3.5}); });
+
+/* 粒を1200個（Canvas 2D では出せない数） */
+const moteTex=(()=>{ const g=new PIXI.Graphics().circle(0,0,6).fill(0xffffff);
+  return app.renderer.generateTexture(g); })();
+const motes=new PIXI.ParticleContainer ? null : null;
+const moteLayer=new PIXI.Container(); world.addChild(moteLayer);
+const M=[];
+for(let i=0;i<K.MOTES;i++){
+  const s=new PIXI.Sprite(moteTex);
+  s.anchor.set(0.5);
+  s.x=Math.random()*K.W; s.y=Math.random()*K.H;
+  s.scale.set(0.10+Math.random()*0.30);
+  s.alpha=0.15+Math.random()*0.45;
+  s.tint=Math.random()<0.5?0xeafcff:0xffffff;
+  moteLayer.addChild(s);
+  M.push({s, vx:(Math.random()-0.5)*0.35, vy:-0.10-Math.random()*0.30, ph:Math.random()*7});
+}
+
+/* 画面全体の色調（Canvas 2D にはできない） */
+const cm=new PIXI.ColorMatrixFilter();
+cm.saturate(K.SAT-1,true); cm.brightness(K.BRI,true);
+app.stage.filters=[cm];
+
+let t=0;
+app.ticker.add(tk=>{
+  t+=tk.deltaTime/60;
+  sea.clear();
+  for(let y=0;y<K.H;y+=34){
+    sea.rect(0,y+Math.sin(t*K.WAVE_HZ+y*0.02)*K.WAVE_AMP*0.25,K.W,16);
+  }
+  sea.fill({color:K.SEA2,alpha:0.85});
+  M.forEach(m=>{ m.s.x+=m.vx; m.s.y+=m.vy;
+    m.s.alpha=0.15+0.35*(0.5+0.5*Math.sin(t*2+m.ph));
+    if(m.s.y<-8){ m.s.y=K.H+8; m.s.x=Math.random()*K.W; }
+    if(m.s.x<-8) m.s.x=K.W+8; if(m.s.x>K.W+8) m.s.x=-8; });
+  drawA(t);
+});
+</script>
