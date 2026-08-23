@@ -30,7 +30,8 @@ const K = {
 
   /* ── 探索（決定24・27・29・38・45・50・57） ── */
   REACH: 46,                    /* 船の探索可能距離（升） */
-  SCAN_R: 2.4,                  /* 一歩ごとに土地を判定する半径（升） */
+  SCAN_R: 2.4,
+  WAKE_R: 2.0,                 /* 船が通った水路の幅（升）。ここは必ず海として分かる */                  /* 一歩ごとに土地を判定する半径（升） */
   REVEAL_R: 11,                 /* 当たったとき黒が剥がれる半径（升・決定45） */
   START_R: 9,                   /* 最初に見えている半径（決定53） */
   EXPLORE_COST: 14,             /* 探索の費用／一升（決定27） */
@@ -192,7 +193,7 @@ const S={
   result:null,             /* 直前の探索の結果 */
   lastRun:null,            /* 引き直し用（同じピンで引き直す） */
   camX:0, camY:0, sail:null, flash:null,
-  msg:'', msgT:0, cutMode:false, cuts:0,
+  msg:'', msgT:0, mode:'link', cuts:0, newLane:null,
 };
 
 function revealCircle(cx,cy,r,forceSea){
@@ -268,9 +269,11 @@ function tidy(){                       /* ぽつんと残った一升を掃除�
   CITIES.forEach(c=>{ if(c.shown) ST[pi(c.x,c.y)]=2; });
 }
 function applyResult(res){
+  /* 船が通った水路は、必ず海として分かる（がべ：海に繋がっていませんが出まくる）
+     ここを剥がしていなかったので、港の海と発見先の海が別の水たまりになっていた */
+  (res.path && res.path.length ? res.path : polyPoints(res.pins))
+    .forEach(p=>revealCircle(Math.round(p.x),Math.round(p.y),K.WAKE_R,true));
   if(res.hit) revealCircle(res.hit.x,res.hit.y,K.REVEAL_R,false);
-  else { const pts=polyPoints(res.pins);
-         pts.forEach(p=>revealCircle(Math.round(p.x),Math.round(p.y),K.SCAN_R,true)); }
   const found=[];
   CITIES.forEach(c=>{
     if(c.shown) return;
@@ -378,25 +381,33 @@ CV.addEventListener('click',e=>{
   const cell=toCell(mx,my);
   const city=CITIES.find(c=>c.shown && Math.hypot(c.x-cell.x,c.y-cell.y)<1.6);
 
-  if(S.cutMode){
+  if(S.mode==='cut'){
     const l=S.lanes.find(l=>l.path.some(p=>Math.hypot(p.x-cell.x,p.y-cell.y)<1.2));
     if(l){ S.lanes.splice(S.lanes.indexOf(l),1); S.cuts++;
            say('航路を切った。育ちは消えた'); }
+    else say('切りたい航路の線を押す');
     return;
   }
-  if(city){                                  /* 繋ぐ（決定70：切るも同じ場所） */
-    if(!sel){ sel=city; say(city.name+' を選んだ。もう一つ選ぶ'); return; }
+  if(S.mode==='link'){
+    if(!city){ say('繋ぎたい都市を押す'); return; }
+    if(!sel){ sel=city; say(city.name+' を選んだ。繋ぐ相手を押す（明るい都市だけ繋げる）'); return; }
     if(sel===city){ sel=null; return; }
     if(S.lanes.some(l=>(l.a===sel&&l.b===city)||(l.a===city&&l.b===sel))){
       say('もう繋がっている'); sel=null; return; }
+    if(!shareSea(sel,city)){
+      say(sel.name+' と '+city.name+' は、まだ海が繋がっていない（暗い都市は繋げない）'); return; }
     const sp=seaPath(sel,city);
-    if(!sp){ say('海が繋がっていない。先に探索する'); sel=null; return; }
+    if(!sp){ say('海が繋がっていない。先に探索する'); return; }
     const cost=Math.round(sp.len*K.OPEN_COST);
-    if(cost>S.gold){ say('金が足りない（開く '+cost+'）'); sel=null; return; }
+    if(cost>S.gold){ say('金が足りない（開く '+cost+'）'); return; }
     S.gold-=cost;
-    S.lanes.push({a:sel,b:city,path:sp.path,len:sp.len,age:0});
-    say('繋いだ（開く −'+cost+'）'); sel=null; return;
+    const lane={a:sel,b:city,path:sp.path,len:sp.len,age:0};
+    S.lanes.push(lane);
+    S.newLane={lane, t0:performance.now()};
+    say('繋いだ　'+sel.name+' ⇄ '+city.name+'　開く −'+cost);
+    sel=null; return;
   }
+  if(city){ say('探索の手では都市は押せない。「繋ぐ」に切り替える'); return; }
   /* ピンを置く（決定38：本数の上限なし。長さだけで縛る） */
   const trial=[...S.pins,{x:cell.x,y:cell.y}];
   if(polyLen(trial)>K.REACH){ say('届かない（上限 '+K.REACH+'）'); return; }
@@ -448,6 +459,34 @@ function restart(){ location.reload(); }
    升目そのままだとギザギザ、ぼかしただけだと甘い。
    ぼかしてから線を取り出すと、なめらかで、しかも輪郭が引ける（がべの指摘） */
 let dirty=true, Lland=[], Lgrass=[], Lknown=[];
+let SEAID=null;               /* 升ごとの「海のかたまり」の番号。0＝海でない */
+function buildSeaIds(){
+  SEAID=new Int32Array(K.COLS*K.ROWS);
+  let id=0;
+  for(let y=0;y<K.ROWS;y++) for(let x=0;x<K.COLS;x++){
+    const i=pi(x,y);
+    if(ST[i]!==1||SEAID[i]) continue;
+    id++; const q=[i]; SEAID[i]=id;
+    for(let h=0;h<q.length;h++){
+      const c=q[h], cx=c%K.COLS, cy=(c/K.COLS)|0;
+      for(const [dx,dy] of [[1,0],[-1,0],[0,1],[0,-1],[1,1],[1,-1],[-1,1],[-1,-1]]){
+        const nx=cx+dx, ny=cy+dy; if(nx<0||ny<0||nx>=K.COLS||ny>=K.ROWS) continue;
+        const ni=pi(nx,ny); if(SEAID[ni]||ST[ni]!==1) continue;
+        SEAID[ni]=id; q.push(ni);
+      }
+    }
+  }
+  CITIES.forEach(c=>{                 /* 都市が面している海のかたまり */
+    c.seas=new Set();
+    for(let dy=-K.COAST_REACH;dy<=K.COAST_REACH;dy++)
+    for(let dx=-K.COAST_REACH;dx<=K.COAST_REACH;dx++){
+      const nx=c.x+dx, ny=c.y+dy; if(nx<0||ny<0||nx>=K.COLS||ny>=K.ROWS) continue;
+      const v=SEAID[pi(nx,ny)]; if(v) c.seas.add(v); }
+  });
+}
+const shareSea=(a,b)=>[...(a.seas||[])].some(v=>(b.seas||new Set()).has(v));
+/* いま光らせる海のかたまり（選んでいる都市、無ければ港） */
+function activeSeas(){ const c=sel||PORT; return c.seas||new Set(); }
 let Pland=null, Pgrass=null, Pknown=null;
 function blurField(pred){
   let A=new Float32Array(K.COLS*K.ROWS);
@@ -684,7 +723,7 @@ function draw(t){
     Lland=isoLoops(Fl,K.ISO_COAST); Lgrass=isoLoops(Fl,K.ISO_GRASS);
     Lknown=isoLoops(Fk,K.ISO_FOG);
     Pland=loopsToPath(Lland); Pgrass=loopsToPath(Lgrass); Pknown=loopsToPath(Lknown);
-    buildDeco(); dirty=false; dirtyMap=true;
+    buildSeaIds(); buildDeco(); dirty=false; dirtyMap=true;
   }
   const OW=Math.max(3,s*K.OUT_W);
   g.lineJoin='round'; g.lineCap='round';
@@ -753,13 +792,29 @@ function draw(t){
     g.fillStyle='rgba(160,235,140,.55)'; g.fill();
   });
 
+  /* 繋がっていない海を暗くする（がべ：どこが繋がっているか分からない） */
+  if(S.mode!=='sail' && SEAID){
+    const act=activeSeas();
+    g.save();
+    for(let y=0;y<K.ROWS;y++) for(let x=0;x<K.COLS;x++){
+      const v=SEAID[pi(x,y)]; if(!v||act.has(v)) continue;
+      const q=cellToPx(x,y); g.fillStyle='rgba(9,16,28,.42)';
+      g.fillRect(q.x-0.5,q.y-0.5,s+1,s+1);
+    }
+    g.restore();
+  }
+
   /* 航路 */
   S.lanes.forEach(l=>{
     g.beginPath();
     l.path.forEach((p,i)=>{ const q=cellToPx(p.x+.5,p.y+.5);
       i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y); });
     g.strokeStyle=K.OUT; g.lineWidth=7; g.stroke();
-    g.strokeStyle=S.cutMode?C.cut:C.lane; g.lineWidth=4; g.stroke();
+    const fresh=S.newLane&&S.newLane.lane===l ? (performance.now()-S.newLane.t0)/900 : 9;
+    g.strokeStyle=S.mode==='cut'?C.cut:C.lane;
+    g.lineWidth = fresh<1 ? 4+ (1-fresh)*9 : 4; g.stroke();
+    if(fresh<1){ g.strokeStyle='rgba(255,255,255,'+((1-fresh)*0.8).toFixed(2)+')';
+      g.lineWidth=2.5; g.stroke(); }
     const mid=l.path[(l.path.length/2)|0]; const q=cellToPx(mid.x,mid.y);
     g.font='700 11px system-ui,sans-serif'; g.fillStyle='#fff'; g.textAlign='center';
     g.fillText('+'+Math.round(laneIncome(l))+'  '+l.age+'年', q.x, q.y-9);
@@ -808,6 +863,8 @@ function draw(t){
     const q=cellToPx(c.x+.5,c.y+.5);
     if(q.x<-90||q.x>W+90||q.y<-70||q.y>H+70) return;
     const r=c===PORT?9:7;
+    const linkable = S.mode!=='link' || c===sel || shareSea(sel||PORT,c);
+    g.save(); if(!linkable) g.globalAlpha=0.40;
     el(q.x,q.y+r*0.9,r*1.1,r*0.4,'rgba(8,34,52,.30)',0);
     g.beginPath(); g.moveTo(q.x-r,q.y+r); g.lineTo(q.x-r,q.y-r*0.2);
     g.lineTo(q.x,q.y-r*1.1); g.lineTo(q.x+r,q.y-r*0.2); g.lineTo(q.x+r,q.y+r);
@@ -817,6 +874,12 @@ function draw(t){
     g.lineTo(q.x+r+1.5,q.y-r*0.2); g.closePath();
     g.fillStyle=C.roof; g.fill(); g.strokeStyle=K.OUT; g.lineWidth=2.6; g.stroke();
     if(sel===c) el(q.x,q.y,r*2.1,r*2.1,'rgba(255,226,122,.28)',3);
+    if(S.mode==='link'&&!linkable){        /* 繋げない都市に、切れた鎖の印 */
+      g.beginPath(); g.moveTo(q.x-r*0.8,q.y-r*1.9); g.lineTo(q.x+r*0.8,q.y-r*0.9);
+      g.moveTo(q.x+r*0.8,q.y-r*1.9); g.lineTo(q.x-r*0.8,q.y-r*0.9);
+      g.strokeStyle='#ff8f8f'; g.lineWidth=2.6; g.stroke();
+    }
+    g.restore();
     if(true) LABELS.push({x:q.x,y:q.y+r*3.2,c});
   });
 
@@ -858,7 +921,10 @@ function draw(t){
   g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub;
   g.fillText('今ターンの見込み', 330, 44);
   g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub;
-  g.fillText('ターン '+S.turn+'　／　海を押してピン　／　右クリックでピンを戻す', 470, 20);
+  { const nm={sail:'探索',link:'繋ぐ',cut:'切る'}[S.mode];
+    const can=CITIES.filter(c=>c.shown&&c!==(sel||PORT)&&shareSea(sel||PORT,c)).length;
+    g.fillText('ターン '+S.turn+'　／　いまの手：'+nm
+      +(S.mode==='link'?'　（'+(sel?sel.name:PORT.name)+' から繋げる都市 '+can+'）':''), 470, 20); }
   if(S.phase==='plan'){
     const len=polyLen(S.pins);
     g.fillStyle=len>0?'#ffe27a':C.sub;
@@ -868,10 +934,24 @@ function draw(t){
   /* ── 下のボタン ── */
   const by=H-74;
   if(S.phase==='plan'){
-    button(W/2-250,by,110,44, S.cutMode?'切る中':'切る', '#e2703c', ()=>{S.cutMode=!S.cutMode;sel=null;}, true);
-    button(W/2-130,by,150,44,'探索に出す','#f0a33c',()=>goExplore(false), S.pins.length>0);
-    button(W/2+30,by,110,44,'スキップ','#6b7686',()=>goExplore(true), true);
-    button(W/2+150,by,100,44,'ピン消す','#5b6572',()=>{S.pins=[];}, S.pins.length>0);
+    const M=[['sail','探索','#4fb8e8'],['link','繋ぐ','#6ccf62'],['cut','切る','#e2703c']];
+    M.forEach(([m,label,col],i)=>{
+      const x=W/2-330+i*112;
+      button(x,by,102,44,label,col,()=>{S.mode=m;sel=null;S.pins=m==='sail'?S.pins:[];},true);
+      if(S.mode===m){ g.beginPath(); g.roundRect(x-4,by-4,110,52,26);
+        g.strokeStyle='#fff'; g.lineWidth=3; g.stroke(); }
+    });
+    if(S.mode==='sail'){
+      button(W/2+20,by,150,44,'探索に出す','#f0a33c',()=>goExplore(false), S.pins.length>0);
+      button(W/2+180,by,110,44,'スキップ','#6b7686',()=>goExplore(true), true);
+      button(W/2+300,by,100,44,'ピン消す','#5b6572',()=>{S.pins=[];}, S.pins.length>0);
+    } else {
+      g.font='12px system-ui,"Hiragino Kaku Gothic ProN",sans-serif';
+      g.fillStyle='#9aa4b2'; g.textAlign='left'; g.textBaseline='middle';
+      g.fillText(S.mode==='link'
+        ? '明るい都市どうしを押すと繋がる。暗い都市は、まだ海が繋がっていない'
+        : '切りたい航路の線を押す。切ると育ちが消える', W/2+24, by+22);
+    }
   }
   if(S.phase==='result'){
     const r=S.result;
