@@ -62,6 +62,21 @@ const K = {
   SHIP_PX: 0.80,               /* 船の大きさ（画面基準・地図の縮尺に引きずられない） */
   REGION_SPREAD: 0.26,         /* 地域の中心を、どれだけ左右に散らすか。小さいほど ぎゅうぎゅう */
   SAIL_MS: 1500,               /* 船が走って戻るまで（演出。計算は押した瞬間に終わっている） */
+
+  /* ── 手応え（決定91・がべ「自分がやったことに対する報酬がない」） ── */
+  GOLD_TWEEN: 4.5,             /* 所持金の数字が追いつく速さ（毎秒の割合） */
+  POP_MS: 2200,                /* 動いた額が出て消えるまで（ミリ秒） */
+  POP_ROW: 19,                 /* 動いた額を並べる行の高さ（画面の点） */
+  POP_MAX: 5,                  /* 一度に出す件数（多いと読めない） */
+  CARGO_HZ: 0.32,              /* 航路の上を荷が一往復する速さ（毎秒） */
+  CARGO_R: 3.4,                /* 荷の粒の大きさ（画面の点） */
+  JUMP_MS: 560,                /* 都市が跳ねる時間（ミリ秒） */
+  JUMP_H: 0.75,                /* 跳ねる高さ（都市の大きさに対する割合） */
+  GROW_STEPS: 3,               /* 都市の育ちの段の数（決定73を目に見せる） */
+  GROW_SIZE: 0.16,             /* 一段ごとに都市が大きくなる割合 */
+  WAKE_N: 12,                  /* 走る船の後ろに残る泡の数 */
+  WAKE_R: 3.0,                 /* その泡の大きさ（画面の点） */
+  SAIL_EASE: 1,                /* 1で船の出だしと終わりがゆっくりになる */
   FLASH_MS: 1600,              /* 剥がれたところを光らせる時間 */
   FIELD_BLUR: 3,               /* 陸の海岸線をぼかす回数。多いほどなだらか */
   FOG_BLUR: 1,                 /* 霧の境目のぼかし。少ないほど「見えている＝探索済み」が正しくなる */
@@ -116,6 +131,8 @@ const Q=new URLSearchParams(location.search);
 const qnum=(k,d)=>{ const v=Number(Q.get(k)); return Number.isFinite(v)&&v>0?v:d; };
 K.COLS=qnum('cols',K.COLS); K.ROWS=qnum('rows',K.ROWS); K.REACH=qnum('reach',K.REACH);
 K.REVEAL_R=qnum('reveal',K.REVEAL_R); K.REGION_SPREAD=Number(Q.get('spread'))||K.REGION_SPREAD; K.QUOTA_TURNS=[qnum('q1',K.QUOTA_TURNS[0]),qnum('q2',K.QUOTA_TURNS[1])];
+/* 取り立ての「額」もつまみにする（がべ承認：取り立ての額を上げる・2026-08-23） */
+K.QUOTAS=[qnum('m1',K.QUOTAS[0]), qnum('m2',K.QUOTAS[1])];
 let seed=qnum('seed',20260822);
 const SEED0=seed;                 /* 乱数が seed を書き換えるので、元の種を控える */
 const R=()=>((seed=seed*16807%2147483647)-1)/2147483646;
@@ -190,7 +207,7 @@ PORT.shown=true;
 
 /* ══ 状態 ══════════════════════════════════════════════════ */
 const S={
-  turn:1, gold:K.GOLD0, quotaIx:0,
+  turn:1, gold:K.GOLD0, quotaIx:0, goldShown:K.GOLD0,
   pins:[],                 /* 探索の折れ線（港からの点） */
   lanes:[],                /* {a,b,path,len,age} */
   phase:'plan',            /* plan | result | over | clear */
@@ -200,6 +217,7 @@ const S={
   msg:'', msgT:0, mode:'link', cuts:0, newLane:null, showSea:null,
   undo:null,               /* 引き直し用（探索を乗せる前の升と都市） */
   route:null,              /* 陸を避けた道（決定89） */
+  pops:[], jumps:[],       /* 手応え（決定91） */
 };
 
 function revealCircle(cx,cy,r,forceSea){
@@ -539,6 +557,24 @@ function laneIncome(l){
 }
 const totalIncome=()=>S.lanes.reduce((s,l)=>s+laneIncome(l),0);
 
+/* ══ 手応え（決定91） ══════════════════════════════════════
+   がべ ──「自分がやったことに対する報酬がない」。
+   金が動いたら必ず数字が動いて見え、押したものが必ず跳ねる */
+function money(d,label){                 /* 金はここだけで動かす。動けば必ず出る */
+  S.gold+=d;
+  S.pops.push({v:d, t0:performance.now(), label:label||''});
+}
+function jump(c){ S.jumps.push({c, t0:performance.now()}); }
+const ease=u=>K.SAIL_EASE? u*u*(3-2*u) : u;   /* 出だしと終わりをゆっくりに */
+/* 都市の育ち。繋がっている航路のうち、いちばん長く続いているもので決まる（決定73） */
+function cityGrow(c){
+  let g=0;
+  S.lanes.forEach(l=>{ if(l.a===c||l.b===c)
+    g=Math.max(g, Math.min(K.GROW_CAP, l.age*K.GROW_PER_TURN)); });
+  return g;
+}
+const growStep=c=>Math.floor(cityGrow(c)/(K.GROW_CAP/K.GROW_STEPS)+1e-9);
+
 /* ══ 入力 ══════════════════════════════════════════════════ */
 /* 一枚マップ（がべ 2026-08-23「スクロールなしで１枚マップで考えてる」）
    地図は常に画面いっぱいに収まる。船の大きさだけ画面基準で据え置き */
@@ -588,10 +624,10 @@ CV.addEventListener('click',e=>{
     if(!sp){ say('海が繋がっていない。先に探索する'); return; }
     const cost=Math.round(sp.len*K.OPEN_COST);
     if(cost>S.gold){ say('金が足りない（開く '+cost+'）'); return; }
-    S.gold-=cost;
+    money(-cost,'開く');
     const lane={a:sel,b:city,path:sp.path,len:sp.len,age:0};
     S.lanes.push(lane);
-    S.newLane={lane, t0:performance.now()};
+    S.newLane={lane, t0:performance.now()}; jump(sel); jump(city);
     say('繋いだ　'+sel.name+' ⇄ '+city.name+'　開く −'+cost);
     sel=null; return;
   }
@@ -616,7 +652,7 @@ CV.addEventListener('contextmenu',e=>{ e.preventDefault(); S.pins.pop(); recalcR
 function goExplore(skip){
   const res = skip ? {pins:[],ran:0,cost:0,hit:null} : runExplore(S.pins);
   if(res.cost>S.gold){ say('探索の金が足りない（'+res.cost+'）'); return; }
-  S.gold-=res.cost;
+  money(-res.cost,'探索');
   S.lastRun=S.pins.map(p=>({...p}));
   startSail(res);
 }
@@ -641,18 +677,22 @@ function undoResult(){                         /* 決定87：引き直したら�
 function reroll(){                            /* 決定61：走った分だけもう一度払う */
   const res=runExplore(S.lastRun);
   if(res.cost>S.gold){ say('引き直す金が足りない（'+res.cost+'）'); return; }
-  S.gold-=res.cost;
+  money(-res.cost,'引き直し');
   undoResult();                               /* 剥がしてから走る。走る絵の下は探索前の地図 */
   S.result=null; startSail(res);
 }
 function nextTurn(){                          /* 決定60：次に進むと確定 */
-  S.gold+=Math.round(totalIncome());          /* 決定67：金が動くのはここ */
+  const before=S.lanes.map(l=>[l.a,l.b]).flat().map(growStep);
+  if(S.lanes.length) money(Math.round(totalIncome()),'航路の収入');  /* 決定67：金が動くのはここ */
   S.lanes.forEach(l=>l.age++);
+  /* 段が上がった都市を跳ねさせる ── 育ちが目に見える（決定91） */
+  { const after=S.lanes.map(l=>[l.a,l.b]).flat();
+    after.forEach((c,i)=>{ if(growStep(c)>before[i]) jump(c); }); }
   S.pins=[]; S.result=null; S.cuts=0; S.turn++; S.phase='plan';
   S.undo=null; recalcRoute();                                /* 決定60：次に進むと確定。もう戻せない */
   /* 決定39：取り立てはターンの頭、収入が入った直後 */
   if(S.quotaIx<K.QUOTAS.length && S.turn>K.QUOTA_TURNS[S.quotaIx]){
-    if(S.gold>=K.QUOTAS[S.quotaIx]){ S.gold-=K.QUOTAS[S.quotaIx]; S.quotaIx++;
+    if(S.gold>=K.QUOTAS[S.quotaIx]){ money(-K.QUOTAS[S.quotaIx],'取り立て'); S.quotaIx++;
       if(S.quotaIx>=K.QUOTAS.length) S.phase='clear'; else say('取り立てを越えた'); }
     else S.phase='over';
   }
@@ -886,9 +926,11 @@ function button(x,y,w,h,label,color,fn,on){
   g.fillText(label,x+w/2,y+h/2+1);
   if(on) BTN.push({x,y,w,h,fn});
 }
-function ship(px,py,s,t){
+function ship(px,py,s,t,face){
   const w=v=>v*s, bob=Math.sin(t*K.BOB_HZ)*s*K.BOB_A;
-  g.save(); g.translate(px,py+bob); g.lineJoin='round'; g.lineCap='round';
+  g.save(); g.translate(px,py+bob);
+  if(face<0) g.scale(-1,1);                 /* 進む向きを向く（決定91） */
+  g.lineJoin='round'; g.lineCap='round';
   g.beginPath(); g.moveTo(w(-2),w(-31)); g.quadraticCurveTo(w(21),w(-27),w(16),w(-8));
   g.quadraticCurveTo(w(6),w(-11),w(-2),w(-10)); g.closePath();
   g.fillStyle=C.sail; g.fill(); g.strokeStyle=K.OUT; g.lineWidth=w(2.8); g.stroke();
@@ -918,6 +960,10 @@ let dirtyMap=true;
 function draw(t){
   BTN.length=0; LABELS.length=0;
   fitView(); const s=VS;
+  const dt=Math.max(0,Math.min(.1,t-(lastT||t))); lastT=t;
+  /* 所持金は、いきなり変わらずに数えあがる（決定91） */
+  S.goldShown += (S.gold-S.goldShown)*Math.min(1,dt*K.GOLD_TWEEN);
+  if(Math.abs(S.gold-S.goldShown)<0.6) S.goldShown=S.gold;
   g.fillStyle='#0e1420'; g.fillRect(0,0,W,H);
 
   /* 海と陸 ── ぼかした場の等高線で描く */
@@ -1031,6 +1077,13 @@ function draw(t){
     g.lineWidth = fresh<1 ? 4+ (1-fresh)*9 : 4; g.stroke();
     if(fresh<1){ g.strokeStyle='rgba(255,255,255,'+((1-fresh)*0.8).toFixed(2)+')';
       g.lineWidth=2.5; g.stroke(); }
+    /* 荷が行き来する ── 繋がっていること自体が動いて見える（決定91） */
+    { const u=(t*K.CARGO_HZ+(l.a.x+l.b.y)*0.07)%1;
+      const tri=u<0.5? u*2 : (1-u)*2;                  /* 行って戻る */
+      const pt=l.path[Math.max(0,Math.min(l.path.length-1,Math.round(tri*(l.path.length-1))))];
+      const q=cellToPx(pt.x+.5,pt.y+.5);
+      el(q.x,q.y,K.CARGO_R+1.6,K.CARGO_R+1.6,K.OUT,0);
+      el(q.x,q.y,K.CARGO_R,K.CARGO_R,'#ffe9a8',0); }
     const mid=l.path[(l.path.length/2)|0]; const q=cellToPx(mid.x,mid.y);
     g.font='700 11px system-ui,sans-serif'; g.fillStyle='#fff'; g.textAlign='center';
     g.fillText('+'+Math.round(laneIncome(l))+'  '+l.age+'年', q.x, q.y-9);
@@ -1038,16 +1091,24 @@ function draw(t){
 
   /* 走っている船の航跡（演出） */
   if(S.phase==='sail' && S.sail){
-    const dt=Math.max(0,Math.min(.1,t-(lastT||t))); lastT=t;
-    S.sail.k += S.sail.pts.length*dt/(K.SAIL_MS/1000);
+    S.sail.u = Math.min(1,(S.sail.u||0) + dt/(K.SAIL_MS/1000));
+    S.sail.k = ease(S.sail.u)*(S.sail.pts.length-1);   /* 出だしと終わりがゆっくり */
     const upto=Math.min(S.sail.pts.length, Math.floor(S.sail.k)+1);
     g.beginPath();
     S.sail.pts.slice(0,upto).forEach((pt,i)=>{ const q=cellToPx(pt.x,pt.y);
       i?g.lineTo(q.x,q.y):g.moveTo(q.x,q.y); });
     g.strokeStyle=K.OUT; g.lineWidth=6; g.stroke();
     g.strokeStyle='#ffe27a'; g.lineWidth=3; g.stroke();
-    if(S.sail.k>=S.sail.pts.length-1) endSail();
-  } else lastT=t;
+    /* 船の後ろに泡を残す（決定91） */
+    for(let i=1;i<=K.WAKE_N;i++){
+      const j=Math.floor(S.sail.k)-i*2; if(j<0) break;
+      const pt=S.sail.pts[j]; if(!pt) continue;
+      const q=cellToPx(pt.x,pt.y), a=(1-i/K.WAKE_N)*0.5;
+      el(q.x,q.y,K.WAKE_R*(1-i/K.WAKE_N*0.5),K.WAKE_R*(1-i/K.WAKE_N*0.5),
+         'rgba(255,255,255,'+a.toFixed(2)+')',0);
+    }
+    if(S.sail.u>=1) endSail();
+  }
 
   /* 剥がれたところを光らせる（探検報告） */
   if(S.flash){
@@ -1078,7 +1139,15 @@ function draw(t){
     if(!c.shown) return;
     const q=cellToPx(c.x+.5,c.y+.5);
     if(q.x<-90||q.x>W+90||q.y<-70||q.y>H+70) return;
-    const r=c===PORT?9:7;
+    /* 育つと大きくなる。繋いだ／段が上がった直後は跳ねる（決定91） */
+    const st=growStep(c);
+    const r=(c===PORT?9:7)*(1+st*K.GROW_SIZE);
+    const jp=S.jumps.find(j=>j.c===c);
+    let hop=0;
+    if(jp){ const e=(performance.now()-jp.t0)/K.JUMP_MS;
+      if(e>=1) S.jumps.splice(S.jumps.indexOf(jp),1);
+      else hop=Math.sin(e*Math.PI)*r*K.JUMP_H; }
+    q.y-=hop;
     const linkable = (S.mode!=='link'&&S.mode!=='move') || c===sel || c===PORT || shareSea(sel||PORT,c);
     g.save(); if(!linkable) g.globalAlpha=0.40;
     el(q.x,q.y+r*0.9,r*1.1,r*0.4,'rgba(8,34,52,.30)',0);
@@ -1089,6 +1158,15 @@ function draw(t){
     g.beginPath(); g.moveTo(q.x-r-1.5,q.y-r*0.2); g.lineTo(q.x,q.y-r*1.35);
     g.lineTo(q.x+r+1.5,q.y-r*0.2); g.closePath();
     g.fillStyle=C.roof; g.fill(); g.strokeStyle=K.OUT; g.lineWidth=2.6; g.stroke();
+    for(let k=1;k<=st;k++){                    /* 育った段だけ、脇に家が増える */
+      const hx=q.x+(k%2?-1:1)*r*(0.95+0.5*Math.floor((k-1)/2)), hy=q.y+r*0.45, hr=r*0.44;
+      g.beginPath(); g.moveTo(hx-hr,hy+hr); g.lineTo(hx-hr,hy-hr*0.2);
+      g.lineTo(hx,hy-hr*1.1); g.lineTo(hx+hr,hy-hr*0.2); g.lineTo(hx+hr,hy+hr);
+      g.closePath(); g.fillStyle=C.wall; g.fill();
+      g.strokeStyle=K.OUT; g.lineWidth=2; g.stroke();
+      g.beginPath(); g.moveTo(hx-hr-1,hy-hr*0.2); g.lineTo(hx,hy-hr*1.3);
+      g.lineTo(hx+hr+1,hy-hr*0.2); g.closePath();
+      g.fillStyle=C.roof; g.fill(); g.strokeStyle=K.OUT; g.lineWidth=2; g.stroke(); }
     if(c===PORT){ el(q.x,q.y,r*2.4,r*2.4,'rgba(255,233,168,.16)',0);
       g.beginPath(); g.arc(q.x,q.y,r*2.2,0,7);
       g.strokeStyle='#ffe9a8'; g.lineWidth=2.4; g.setLineDash([5,4]); g.stroke(); g.setLineDash([]); }
@@ -1105,7 +1183,8 @@ function draw(t){
   /* 名札：先に置いたものと重なるなら出さない（がべの指摘） */
   const placed=[];
   LABELS.forEach(L=>{
-    const sub=L.c.good.name+'・'+L.c.good.eff;
+    const gr0=cityGrow(L.c);
+    const sub=L.c.good.name+'・'+L.c.good.eff+(gr0>0? ' ▲'+Math.round(gr0*100)+'%':'');
     g.font='700 13px system-ui,"Hiragino Kaku Gothic ProN",sans-serif';
     let tw=g.measureText(L.c.name).width;
     g.font='11px system-ui,sans-serif'; tw=Math.max(tw,g.measureText(sub).width);
@@ -1113,22 +1192,48 @@ function draw(t){
     const hit=placed.some(b=>!(box.x+box.w<b.x||b.x+b.w<box.x||box.y+box.h<b.y||b.y+b.h<box.y));
     if(hit) return;
     placed.push(box);
-    plate(L.x,L.y,L.c.name,L.c.good.name+'・'+L.c.good.eff);
+    { const gr=cityGrow(L.c);
+      plate(L.x,L.y,L.c.name, L.c.good.name+'・'+L.c.good.eff
+        + (gr>0? ' ▲'+Math.round(gr*100)+'%' : '')); }
   });
 
   /* 船は港に置く */
-  { let sx=PORT.x+.5, sy=PORT.y+.5;
-    if(S.sail){ const pt=S.sail.pts[Math.min(S.sail.pts.length-1,Math.floor(S.sail.k))];
-      if(pt){ sx=pt.x; sy=pt.y; } }
-    const q=cellToPx(sx,sy); ship(q.x,q.y-16,K.SHIP_PX,t); }
+  { let sx=PORT.x+.5, sy=PORT.y+.5, face=1;
+    if(S.sail){ const i=Math.min(S.sail.pts.length-1,Math.floor(S.sail.k)), pt=S.sail.pts[i];
+      if(pt){ sx=pt.x; sy=pt.y;
+        const pv=S.sail.pts[Math.max(0,i-3)];
+        if(pv && Math.abs(pt.x-pv.x)>1e-3) face = pt.x>=pv.x ? 1 : -1; } }
+    const q=cellToPx(sx,sy); ship(q.x,q.y-16,K.SHIP_PX,t,face); }
 
   /* ── 上の帯（決定19：残りターン・取り立て・所持金は常に見える） ── */
   g.fillStyle='rgba(14,20,32,.86)'; g.fillRect(0,0,W,52);
   g.strokeStyle='#222b3a'; g.lineWidth=1; g.beginPath(); g.moveTo(0,52); g.lineTo(W,52); g.stroke();
   g.textAlign='left'; g.textBaseline='middle';
-  g.font='700 20px system-ui,sans-serif'; g.fillStyle='#ffe9a8';
-  g.fillText(S.gold.toLocaleString(), 18, 26);
+  /* 所持金は数えあがる。動いている間はふくらむ（決定91） */
+  const moving=S.gold!==S.goldShown;
+  const pul=moving? 1+0.12*Math.abs(Math.sin(t*9)) : 1;
+  g.save(); g.translate(18,26); g.scale(pul,pul);
+  g.font='700 20px system-ui,sans-serif';
+  g.fillStyle=moving? (S.gold>S.goldShown?'#bdf5c0':'#ffb3b3') : '#ffe9a8';
+  g.fillText(Math.round(S.goldShown).toLocaleString(), 0, 0);
+  g.restore();
   g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub; g.fillText('所持', 18, 44);
+
+  /* 動いた額を、所持金の下に新しい順で積む（決定91）
+     帯の中に浮かせると取り立ての数字に重なるので、帯の下に出す */
+  S.pops=S.pops.filter(pp=>(performance.now()-pp.t0)/K.POP_MS<1);
+  S.pops.slice(-K.POP_MAX).reverse().forEach((pp,i)=>{
+    const e=(performance.now()-pp.t0)/K.POP_MS;
+    const y=K.UI_TOP+16+i*K.POP_ROW+e*6, a=Math.min(1,(1-e)*2.6);
+    g.save(); g.globalAlpha=a; g.textAlign='left'; g.textBaseline='middle';
+    g.font='700 15px system-ui,sans-serif';
+    const txt=(pp.v>=0?'+':'−')+Math.abs(pp.v).toLocaleString();
+    g.fillStyle=pp.v>=0?'#8ef29a':'#ff9d9d';
+    g.fillText(txt, 18, y);
+    if(pp.label){ g.font='10px system-ui,sans-serif'; g.fillStyle=C.sub;
+      g.fillText(pp.label, 18+g.measureText(txt).width+8, y+1); }
+    g.restore();
+  });
   const q=K.QUOTAS[Math.min(S.quotaIx,K.QUOTAS.length-1)];
   const qt=K.QUOTA_TURNS[Math.min(S.quotaIx,K.QUOTAS.length-1)];
   g.font='700 18px system-ui,sans-serif'; g.fillStyle=(S.gold<q)?'#ffb3b3':'#bdf5c0';
@@ -1254,7 +1359,11 @@ const HINTS=[
   ['船の届く距離（reach）',   '長く ↔ 短く', '44 〜 92',          '長いほど一回で遠くへ。短いと刻む'],
   ['剥がれる範囲（reveal）',  '広く ↔ 狭く', '6 〜 18',           '広いと地図が早く埋まる。狭いと狙って彫れる'],
   ['取り立てまで（q1/q2）',   '遅く ↔ 早く', '6/14 〜 16/30',     '遅いほど楽。早いと締め切りが濃い'],
+  ['取り立ての額（m1/m2）',   '重く ↔ 軽く', '600/2400 〜 12000/60000',
+   'クリア時 62,121 に対して 2,400 では効いていなかった（がべ・2026-08-23）'],
 ];
+/* 取り立ての重さのセット（案。押して比べる。既定は「いままで」） */
+const QSETS={ 'いままで':[600,2400], '重い':[4000,20000], 'かなり重い':[9000,45000] };
 function buildUI(){
   const cur=Q.get('p')||'ふつう';
   const other=Q.get('o')||(cur==='広い'?'狭い':'広い');
@@ -1293,6 +1402,17 @@ function buildUI(){
   hint.style.marginTop='8px';
   box.appendChild(hint);
 
+  const qh=document.createElement('div');
+  qh.innerHTML='<b style="color:#eef1f5">取り立ての重さ</b>'
+    +'<div style="color:#7f8b9c;margin-bottom:6px">押すと種はそのままで作り直す。'
+    +'<span style="color:#ffb3b3">「重い」「かなり重い」はこちらの案</span></div>';
+  qh.style.marginTop='8px'; box.appendChild(qh);
+  const goQ=(m)=>{ const u=new URLSearchParams(location.search);
+    u.set('seed',SEED0); u.set('m1',m[0]); u.set('m2',m[1]); location.search='?'+u.toString(); };
+  Object.keys(QSETS).forEach(n=>box.appendChild(
+    btn(n+'（'+QSETS[n][0].toLocaleString()+' / '+QSETS[n][1].toLocaleString()+'）',
+        K.QUOTAS[0]===QSETS[n][0]&&K.QUOTAS[1]===QSETS[n][1], ()=>goQ(QSETS[n]))));
+
   const out=document.createElement('div'); out.style.marginTop='8px';
   const ta=document.createElement('textarea');
   ta.style.cssText='display:none;width:100%;height:88px;margin-top:6px;background:#0e1420;'
@@ -1314,7 +1434,8 @@ function buildUI(){
           ? '既定から変えたもの\n'+diff.map(k=>'・'+NAME[k]+' = '+now[k]+'（既定 '+def[k]+'）── '+WHY[k]).join('\n')
           : '既定のまま（変えたものは無し）')
       + '\n\nそのまま貼れる形：\n?seed='+SEED0+'&cols='+K.COLS+'&rows='+K.ROWS
-      + '&reach='+K.REACH+'&reveal='+K.REVEAL_R+'&q1='+K.QUOTA_TURNS[0]+'&q2='+K.QUOTA_TURNS[1];
+      + '&reach='+K.REACH+'&reveal='+K.REVEAL_R+'&q1='+K.QUOTA_TURNS[0]+'&q2='+K.QUOTA_TURNS[1]
+      + '&m1='+K.QUOTAS[0]+'&m2='+K.QUOTAS[1];
     ta.select();
   }));
   out.appendChild(ta);
