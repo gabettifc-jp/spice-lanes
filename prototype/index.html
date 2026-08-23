@@ -100,11 +100,15 @@ addEventListener('resize',()=>{fit();});
 fit();
 
 /* 決まった種でぶれない乱数（決定50：計算は押した瞬間に終わる） */
-/* ?seed= ?cols= ?rows= ?reach= でつまみを外から変えられる（比べるため） */
+const DEF=JSON.parse(JSON.stringify(K));   /* 既定値を控える（mihon.md の3） */
+
+/* ?seed= ?cols= ?rows= ?reach= ?reveal= でつまみを外から変えられる（比べるため） */
 const Q=new URLSearchParams(location.search);
 const qnum=(k,d)=>{ const v=Number(Q.get(k)); return Number.isFinite(v)&&v>0?v:d; };
 K.COLS=qnum('cols',K.COLS); K.ROWS=qnum('rows',K.ROWS); K.REACH=qnum('reach',K.REACH);
+K.REVEAL_R=qnum('reveal',K.REVEAL_R); K.QUOTA_TURNS=[qnum('q1',K.QUOTA_TURNS[0]),qnum('q2',K.QUOTA_TURNS[1])];
 let seed=qnum('seed',20260822);
+const SEED0=seed;                 /* 乱数が seed を書き換えるので、元の種を控える */
 const R=()=>((seed=seed*16807%2147483647)-1)/2147483646;
 
 /* ── 想定地形を絵で描いて、その上を確率にする（決定51） ── */
@@ -871,6 +875,97 @@ function draw(t){
     g.fillStyle='#eef1f5'; g.textBaseline='middle'; g.fillText(S.msg,W/2,H-124);
   }
 }
+
+/* ══════════════════════════════════════════════════════
+   触ってもらうための板（gamedev/templates/mihon.md の四つ）
+   1 つまみのセットを押しボタンで／2 どちらへどこまで動かすか
+   3 いまの設定を出すボタン／4 そのまま貼れる文
+   ══════════════════════════════════════════════════════ */
+const PRESETS={
+  '狭い':   {cols:64,  rows:40,  reach:30, reveal:8},
+  'ふつう': {cols:128, rows:80,  reach:46, reveal:11},
+  '広い':   {cols:180, rows:112, reach:64, reveal:14},
+};
+const HINTS=[
+  ['地図の広さ（cols/rows）', '広く ↔ 狭く', '64×40 〜 180×112', '広いほど探す判断が重い。狭いと全部見えてしまう'],
+  ['船の届く距離（reach）',   '長く ↔ 短く', '30 〜 64',          '長いほど一回で遠くへ。短いと刻む'],
+  ['剥がれる範囲（reveal）',  '広く ↔ 狭く', '6 〜 18',           '広いと地図が早く埋まる。狭いと狙って彫れる'],
+  ['取り立てまで（q1/q2）',   '遅く ↔ 早く', '6/14 〜 16/30',     '遅いほど楽。早いと締め切りが濃い'],
+];
+function buildUI(){
+  const cur=Q.get('p')||'ふつう';
+  const other=Q.get('o')||(cur==='広い'?'狭い':'広い');
+  const go=(name,o)=>{ const P=PRESETS[name];
+    location.search='?seed='+SEED0+'&p='+encodeURIComponent(name)+'&o='+encodeURIComponent(o)
+      +'&cols='+P.cols+'&rows='+P.rows+'&reach='+P.reach+'&reveal='+P.reveal; };
+  const box=document.createElement('div');
+  box.style.cssText='position:fixed;right:12px;top:60px;width:290px;z-index:9;'
+    +'background:rgba(16,23,36,.94);border:1px solid #2a3446;border-radius:14px;'
+    +'padding:12px 13px;font:12px/1.55 system-ui,"Hiragino Kaku Gothic ProN",sans-serif;color:#cfd8e6';
+  const btn=(label,on,fn)=>{ const b=document.createElement('button');
+    b.textContent=label; b.onclick=fn;
+    b.style.cssText='margin:0 5px 5px 0;padding:5px 11px;border-radius:999px;cursor:pointer;'
+      +'border:1px solid #3a4557;font:600 12px system-ui,sans-serif;'
+      +(on?'background:#f0a33c;color:#1b2130':'background:#232d3d;color:#cfd8e6');
+    return b; };
+  const h=document.createElement('div');
+  h.innerHTML='<b style="color:#eef1f5">つまみのセット</b>'
+    +'<div style="color:#7f8b9c;margin-bottom:6px">個々のつまみは触らなくていい</div>';
+  box.appendChild(h);
+  Object.keys(PRESETS).forEach(n=>box.appendChild(btn(n, n===cur, ()=>go(n, n===cur?other:cur))));
+
+  const sw=document.createElement('div');
+  sw.innerHTML='<div style="margin:8px 0 4px;color:#7f8b9c">'
+    +'<b style="color:#eef1f5">x キー</b> で <b style="color:#ffe9a8">'+cur+'</b> ⇄ '+other
+    +'（種は同じ）</div>';
+  box.appendChild(sw);
+  addEventListener('keydown',e=>{ if(e.key==='x') go(other,cur); });
+
+  const hint=document.createElement('div');
+  hint.innerHTML='<b style="color:#eef1f5">どのつまみを、どちらへ</b>'
+    +'<table style="width:100%;border-collapse:collapse;margin-top:4px">'
+    + HINTS.map(([n,d,r,w])=>'<tr><td style="padding:2px 0;color:#cfd8e6">'+n
+      +'<div style="color:#7f8b9c">'+d+'　<span style="color:#9aa8bb">'+r+'</span><br>'+w+'</div></td></tr>').join('')
+    +'</table>';
+  hint.style.marginTop='8px';
+  box.appendChild(hint);
+
+  const out=document.createElement('div'); out.style.marginTop='8px';
+  const ta=document.createElement('textarea');
+  ta.style.cssText='display:none;width:100%;height:88px;margin-top:6px;background:#0e1420;'
+    +'color:#eef1f5;border:1px solid #2a3446;border-radius:8px;padding:7px;font:11.5px/1.5 ui-monospace,monospace';
+  out.appendChild(btn('いまの設定を出す',false,()=>{
+    const now={cols:K.COLS,rows:K.ROWS,reach:K.REACH,reveal:K.REVEAL_R,
+               q1:K.QUOTA_TURNS[0],q2:K.QUOTA_TURNS[1]};
+    const def={cols:DEF.COLS,rows:DEF.ROWS,reach:DEF.REACH,reveal:DEF.REVEAL_R,
+               q1:DEF.QUOTA_TURNS[0],q2:DEF.QUOTA_TURNS[1]};
+    const NAME={cols:'地図の横',rows:'地図の縦',reach:'船の届く距離',
+                reveal:'剥がれる範囲',q1:'一回目の取り立て',q2:'二回目の取り立て'};
+    const WHY={cols:'広いほど探す判断が重い',rows:'同上',reach:'長いほど一回で遠くへ',
+               reveal:'広いと早く埋まる。狭いと狙って彫れる',
+               q1:'遅いほど楽',q2:'遅いほど楽'};
+    const diff=Object.keys(now).filter(k=>now[k]!==def[k]);
+    ta.style.display='block';
+    ta.value = 'セット：'+(Q.get('p')||'ふつう')+'　種：'+SEED0+'\n'
+      + (diff.length
+          ? '既定から変えたもの\n'+diff.map(k=>'・'+NAME[k]+' = '+now[k]+'（既定 '+def[k]+'）── '+WHY[k]).join('\n')
+          : '既定のまま（変えたものは無し）')
+      + '\n\nそのまま貼れる形：\n?seed='+SEED0+'&cols='+K.COLS+'&rows='+K.ROWS
+      + '&reach='+K.REACH+'&reveal='+K.REVEAL_R+'&q1='+K.QUOTA_TURNS[0]+'&q2='+K.QUOTA_TURNS[1];
+    ta.select();
+  }));
+  out.appendChild(ta);
+  box.appendChild(out);
+
+  const tog=document.createElement('button');
+  tog.textContent='つまみ';
+  tog.style.cssText='position:fixed;right:12px;top:20px;z-index:10;padding:5px 13px;border-radius:999px;'
+    +'border:1px solid #3a4557;background:#232d3d;color:#cfd8e6;cursor:pointer;font:600 12px system-ui,sans-serif';
+  tog.onclick=()=>{ box.style.display = box.style.display==='none'?'block':'none'; };
+  document.body.appendChild(tog); document.body.appendChild(box);
+}
+buildUI();
+
 let t0=null;
 function loop(ts){ if(t0===null)t0=ts; draw((ts-t0)/1000); requestAnimationFrame(loop); }
 requestAnimationFrame(loop);
