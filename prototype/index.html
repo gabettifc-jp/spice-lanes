@@ -60,9 +60,10 @@ const K = {
   REGION_SPREAD: 0.26,         /* 地域の中心を、どれだけ左右に散らすか。小さいほど ぎゅうぎゅう */
   SAIL_MS: 1500,               /* 船が走って戻るまで（演出。計算は押した瞬間に終わっている） */
   FLASH_MS: 1600,              /* 剥がれたところを光らせる時間 */
-  FIELD_BLUR: 3,               /* 升目をぼかす回数。多いほど海岸線がなだらか */
+  FIELD_BLUR: 3,               /* 陸の海岸線をぼかす回数。多いほどなだらか */
+  FOG_BLUR: 1,                 /* 霧の境目のぼかし。少ないほど「見えている＝探索済み」が正しくなる */
   ISO_COAST: 0.50,             /* 海岸線を取る高さ */
-  ISO_FOG: 0.34,               /* 霧を抜く高さ。低いほど広く抜ける（陸が霧に食われない） */
+  ISO_FOG: 0.50,               /* 霧を抜く高さ。0.5＝真の境目 */
   ISO_GRASS: 0.72,             /* 草のふちを取る高さ（砂の帯の広さになる） */
   OUT_W: 0.34,                 /* 輪郭の太さ（升に対する比） */
   PAT_PX: 96,                  /* 模様の一枚の大きさ（画素） */
@@ -193,7 +194,8 @@ const S={
   result:null,             /* 直前の探索の結果 */
   lastRun:null,            /* 引き直し用（同じピンで引き直す） */
   camX:0, camY:0, sail:null, flash:null,
-  msg:'', msgT:0, mode:'link', cuts:0, newLane:null,
+  msg:'', msgT:0, mode:'link', cuts:0, newLane:null, showSea:null,
+  undo:null,               /* 引き直し用（探索を乗せる前の升と都市） */
 };
 
 function revealCircle(cx,cy,r,forceSea){
@@ -269,6 +271,9 @@ function tidy(){                       /* ぽつんと残った一升を掃除�
   CITIES.forEach(c=>{ if(c.shown) ST[pi(c.x,c.y)]=2; });
 }
 function applyResult(res){
+  /* 引き直しで前の結果が残らないように、乗せる前の升を控えておく（決定44・決定87）
+     控えるのは「乗せる直前」なので、何度引き直しても戻る先は探索前の一枚 */
+  S.undo={st:ST.slice(), shown:CITIES.map(c=>c.shown)};
   /* 船が通った水路は、必ず海として分かる（がべ：海に繋がっていませんが出まくる）
      ここを剥がしていなかったので、港の海と発見先の海が別の水たまりになっていた */
   (res.path && res.path.length ? res.path : polyPoints(res.pins))
@@ -395,7 +400,9 @@ CV.addEventListener('click',e=>{
     if(S.lanes.some(l=>(l.a===sel&&l.b===city)||(l.a===city&&l.b===sel))){
       say('もう繋がっている'); sel=null; return; }
     if(!shareSea(sel,city)){
-      say(sel.name+' と '+city.name+' は、まだ海が繋がっていない（暗い都市は繋げない）'); return; }
+      say(sel.name+' と '+city.name+' は、別の海に居る。あいだの海を探索する');
+      S.showSea={seas:new Set([...(city.seas||[])]), t0:performance.now()};
+      return; }
     const sp=seaPath(sel,city);
     if(!sp){ say('海が繋がっていない。先に探索する'); return; }
     const cost=Math.round(sp.len*K.OPEN_COST);
@@ -446,15 +453,24 @@ function endSail(){
   if(res.hit) S.flash={x:res.hit.x, y:res.hit.y, r:K.REVEAL_R, t0:performance.now()};
   S.result=res; S.phase='result';
 }
+function undoResult(){                         /* 決定87：引き直したら、前の結果は消える */
+  if(!S.undo) return;
+  ST.set(S.undo.st);
+  CITIES.forEach((c,i)=>{ c.shown=S.undo.shown[i]; });
+  S.undo=null; S.flash=null; dirty=true;
+}
 function reroll(){                            /* 決定61：走った分だけもう一度払う */
   const res=runExplore(S.lastRun);
   if(res.cost>S.gold){ say('引き直す金が足りない（'+res.cost+'）'); return; }
-  S.gold-=res.cost; S.result=null; startSail(res);
+  S.gold-=res.cost;
+  undoResult();                               /* 剥がしてから走る。走る絵の下は探索前の地図 */
+  S.result=null; startSail(res);
 }
 function nextTurn(){                          /* 決定60：次に進むと確定 */
   S.gold+=Math.round(totalIncome());          /* 決定67：金が動くのはここ */
   S.lanes.forEach(l=>l.age++);
   S.pins=[]; S.result=null; S.cuts=0; S.turn++; S.phase='plan';
+  S.undo=null;                                /* 決定60：次に進むと確定。もう戻せない */
   /* 決定39：取り立てはターンの頭、収入が入った直後 */
   if(S.quotaIx<K.QUOTAS.length && S.turn>K.QUOTA_TURNS[S.quotaIx]){
     if(S.gold>=K.QUOTAS[S.quotaIx]){ S.gold-=K.QUOTAS[S.quotaIx]; S.quotaIx++;
@@ -497,10 +513,10 @@ const shareSea=(a,b)=>[...(a.seas||[])].some(v=>(b.seas||new Set()).has(v));
 /* いま光らせる海のかたまり（選んでいる都市、無ければ港） */
 function activeSeas(){ const c=sel||PORT; return c.seas||new Set(); }
 let Pland=null, Pgrass=null, Pknown=null;
-function blurField(pred){
+function blurField(pred,passes){
   let A=new Float32Array(K.COLS*K.ROWS);
   for(let y=0;y<K.ROWS;y++) for(let x=0;x<K.COLS;x++) A[pi(x,y)]=pred(x,y)?1:0;
-  for(let k=0;k<K.FIELD_BLUR;k++){
+  for(let k=0;k<(passes||K.FIELD_BLUR);k++){
     const B=new Float32Array(A.length);
     for(let y=0;y<K.ROWS;y++) for(let x=0;x<K.COLS;x++){
       let t=0,n=0;
@@ -728,7 +744,7 @@ function draw(t){
   /* 海と陸 ── ぼかした場の等高線で描く */
   if(dirty){
     const known=(x,y)=>ST[pi(x,y)]!==0, isLand=(x,y)=>ST[pi(x,y)]===2;
-    const Fl=blurField(isLand), Fk=blurField(known);
+    const Fl=blurField(isLand,K.FIELD_BLUR), Fk=blurField(known,K.FOG_BLUR);
     Lland=isoLoops(Fl,K.ISO_COAST); Lgrass=isoLoops(Fl,K.ISO_GRASS);
     Lknown=isoLoops(Fk,K.ISO_FOG);
     Pland=loopsToPath(Lland); Pgrass=loopsToPath(Lgrass); Pknown=loopsToPath(Lknown);
@@ -801,14 +817,26 @@ function draw(t){
     g.fillStyle='rgba(160,235,140,.55)'; g.fill();
   });
 
-  /* 繋がっていない海を暗くする（がべ：どこが繋がっているか分からない） */
+  /* 繋がっている海／いない海を、升からそのまま描く。
+     ここだけは等高線を使わない ── **見えているものが、判定そのもの**（がべ：見た目では繋がってそう） */
   if(S.mode!=='sail' && SEAID){
-    const act=activeSeas();
+    let act=activeSeas();
+    if(S.showSea){ if(performance.now()-S.showSea.t0>2200) S.showSea=null;
+      else act=new Set([...act,...S.showSea.seas]); }
+    const pul=0.5+0.5*Math.sin(t*2.2);
     g.save();
     for(let y=0;y<K.ROWS;y++) for(let x=0;x<K.COLS;x++){
-      const v=SEAID[pi(x,y)]; if(!v||act.has(v)) continue;
-      const q=cellToPx(x,y); g.fillStyle='rgba(9,16,28,.42)';
-      g.fillRect(q.x-0.5,q.y-0.5,s+1,s+1);
+      const i=pi(x,y), v=SEAID[i];
+      const q=cellToPx(x,y);
+      if(ST[i]===0){                       /* 未探索：海に見えていても、ここは通れない */
+        g.fillStyle='rgba(9,16,28,.55)'; g.fillRect(q.x-0.5,q.y-0.5,s+1,s+1); continue; }
+      if(!v) continue;                     /* 陸 */
+      if(act.has(v)){                      /* 繋がっている海：明るく */
+        g.fillStyle='rgba(180,240,255,'+(0.10+pul*0.06).toFixed(3)+')';
+        g.fillRect(q.x-0.5,q.y-0.5,s+1,s+1);
+      } else {                             /* 別のかたまり：暗く */
+        g.fillStyle='rgba(9,16,28,.50)'; g.fillRect(q.x-0.5,q.y-0.5,s+1,s+1);
+      }
     }
     g.restore();
   }
