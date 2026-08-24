@@ -56,6 +56,20 @@ const K = {
   QUOTAS: [600, 2400],         /* 取り立ての額（二回・決定47） */
   QUOTA_TURNS: [10, 22],         /* 何ターン目に来るか */
 
+  /* ── 音（**全部つまみ。値は仮**。sozai-list.md のイベント名で呼ぶ） ──
+     使ってよい範囲：手触りを見るためだけ。捨てる日：地の曲を入れる日。
+     捨てたあと：曲と一緒に、鳴り方をまとめて決め直す */
+  SFX_ON: 1,                    /* 音を鳴らすか */
+  VOL_ALL: 1.0,                 /* 全体の音量 */
+  VOL_DEF: 0.55,                /* 名前の無い音の音量 */
+  SFX_GAP: 60,                  /* 同じ音を続けて鳴らさない間（ミリ秒） */
+  VOL: {                        /* イベント名ごとの音量 */
+    'route.linked': 0.60, 'explore.start': 0.45, 'explore.report': 0.40,
+    'city.found': 0.62, 'city.grew': 0.45, 'turn.end': 0.35,
+    'money.tick': 0.30, 'money.tick2': 0.30, 'cut': 0.42 },
+
+  GOODS_PX: 26,                 /* 名札に出す特産品の絵の大きさ（画素・仮） */
+
   /* ── 見た目（決定30・75・tetsuki-pop.md） ── */
   UI_TOP: 56, UI_BOT: 92, PAD: 14,   /* 一枚マップ。地図は常に画面に収まる */
   SHIP_PX: 0.80,               /* 船の大きさ（画面基準・地図の縮尺に引きずられない） */
@@ -562,8 +576,11 @@ const totalIncome=()=>S.lanes.reduce((s,l)=>s+laneIncome(l),0);
 /* ══ 手応え（決定91） ══════════════════════════════════════
    がべ ──「自分がやったことに対する報酬がない」。
    金が動いたら必ず数字が動いて見え、押したものが必ず跳ねる */
+let tickN=0;
 function money(d,label){                 /* 金はここだけで動かす。動けば必ず出る */
   S.gold+=d;
+  sfx((tickN++ % 2) ? 'money.tick2' : 'money.tick');
+
   S.pops.push({v:d, t0:performance.now(), label:label||''});
 }
 function jump(c){ S.jumps.push({c, t0:performance.now()}); }
@@ -607,7 +624,7 @@ CV.addEventListener('click',e=>{
 
   if(S.mode==='cut'){
     const l=S.lanes.find(l=>l.path.some(p=>Math.hypot(p.x-cell.x,p.y-cell.y)<1.2));
-    if(l){ S.lanes.splice(S.lanes.indexOf(l),1); S.cuts++;
+    if(l){ S.lanes.splice(S.lanes.indexOf(l),1); S.cuts++; sfx('cut');
            say('航路を切った。育ちは消えた'); }
     else say('切りたい航路の線を押す');
     return;
@@ -630,6 +647,7 @@ CV.addEventListener('click',e=>{
     const lane={a:sel,b:city,path:sp.path,len:sp.len,age:0};
     S.lanes.push(lane);
     S.newLane={lane, t0:performance.now()}; jump(sel); jump(city);
+    sfx('route.linked');                            /* ごほうび・高（決91） */
     say('繋いだ　'+sel.name+' ⇄ '+city.name+'　開く −'+cost);
     sel=null; return;
   }
@@ -662,12 +680,13 @@ function startSail(res){                 /* 走って戻る絵を再生する。
   const out=res.path&&res.path.length?res.path:[{x:PORT.x,y:PORT.y}];
   const back=out.slice(0,-1).reverse();
   S.sail={pts:out.concat(back), k:0, res};
-  S.phase='sail';
+  S.phase='sail'; sfx('explore.start');
 }
 function endSail(){
   const res=S.sail.res; S.sail=null;
   applyResult(res);
   if(res.hit) S.flash={x:res.hit.x, y:res.hit.y, r:K.REVEAL_R, t0:performance.now()};
+  sfx((res.found && res.found.length) ? 'city.found' : 'explore.report');
   S.result=res; S.phase='result';
 }
 function undoResult(){                         /* 決定87：引き直したら、前の結果は消える */
@@ -684,12 +703,13 @@ function reroll(){                            /* 決定61：走った分だけ�
   S.result=null; startSail(res);
 }
 function nextTurn(){                          /* 決定60：次に進むと確定 */
+  sfx('turn.end');
   const before=S.lanes.map(l=>[l.a,l.b]).flat().map(growStep);
   if(S.lanes.length) money(Math.round(totalIncome()),'航路の収入');  /* 決定67：金が動くのはここ */
   S.lanes.forEach(l=>l.age++);
   /* 段が上がった都市を跳ねさせる ── 育ちが目に見える（決定91） */
   { const after=S.lanes.map(l=>[l.a,l.b]).flat();
-    after.forEach((c,i)=>{ if(growStep(c)>before[i]) jump(c); }); }
+    after.forEach((c,i)=>{ if(growStep(c)>before[i]){ jump(c); sfx('city.grew'); } }); }
   S.pins=[]; S.result=null; S.cuts=0; S.turn++; S.phase='plan';
   S.undo=null; recalcRoute();                                /* 決定60：次に進むと確定。もう戻せない */
   /* 決定39：取り立てはターンの頭、収入が入った直後 */
@@ -901,6 +921,37 @@ function buildDeco(){
   }
 }
 
+
+/* ══ 素材（外から取ったもの。出どころとライセンスは sozai-list.md） ══ */
+const IMG = {"tree":"../sozai/riku/deco_tree_top.png","rock_a":"../sozai/riku/deco_rock_a.png","rock_b":"../sozai/riku/deco_rock_b.png","rock_c":"../sozai/riku/deco_rock_c.png","rock_d":"../sozai/riku/deco_rock_d.png","pebble":"../sozai/riku/deco_pebble.png","岩塩":"../sozai/tokusan/goods_iwashio.png","羊毛":"../sozai/tokusan/goods_youmou.png","亜麻":"../sozai/tokusan/goods_ama.png","星図":"../sozai/tokusan/goods_seizu.png","黒檀":"../sozai/tokusan/goods_kokutan.png","龍涎香":"../sozai/tokusan/goods_ryuzenko.png","丁子":"../sozai/tokusan/goods_choji.png"};
+const SFX_SRC = {"city.found":"../oto/city.found.ogg","city.grew":"../oto/city.grew.ogg","cut":"../oto/cut.ogg","explore.report":"../oto/explore.report.ogg","explore.start":"../oto/explore.start.ogg","money.tick":"../oto/money.tick.ogg","money.tick2":"../oto/money.tick2.ogg","route.linked":"../oto/route.linked.ogg","turn.end":"../oto/turn.end.ogg"};
+const A = {};                                   /* 読めた絵 */
+for (const k in IMG){ const im = new Image(); im.src = IMG[k];
+  im.onload = ()=>{ A[k] = im; dirty = true; }; }
+const ROCKS = ['rock_a','rock_b','rock_c','rock_d','pebble'];
+
+/* 特産品の絵。**名札の角に出す**（いままで文字だけだった） */
+function goodsIcon(x, y, name, size){
+  const im = A[name]; if(!im) return;
+  const w = size || 26, h = w * im.height / im.width;
+  g.drawImage(im, x - w/2, y - h/2, w, h);
+}
+
+/* 音：**イベント名 → ファイル**。コードは名前しか知らない */
+const SND = {};
+for (const k in SFX_SRC){ const au = new Audio(SFX_SRC[k]); au.preload='auto'; SND[k]=au; }
+let lastSnd = {};
+function sfx(name){                             /* 同じ音の連打を間引く（K.SFX_GAP） */
+  if (!K.SFX_ON) return;
+  const now = performance.now();
+  if (lastSnd[name] && now - lastSnd[name] < K.SFX_GAP) return;
+  lastSnd[name] = now;
+  const src = SND[name]; if (!src) return;
+  const a = src.cloneNode();
+  a.volume = Math.max(0, Math.min(1, (K.VOL[name] == null ? K.VOL_DEF : K.VOL[name]) * K.VOL_ALL));
+  a.play().catch(()=>{});
+}
+
 /* ══ 描く（tetsuki-pop.md の手つき） ══════════════════════ */
 function el(x,y,rx,ry,fill,lw){ g.beginPath(); g.ellipse(x,y,rx,ry,0,0,7);
   g.fillStyle=fill; g.fill(); if(lw){g.strokeStyle=K.OUT;g.lineWidth=lw;g.stroke();} }
@@ -1019,29 +1070,28 @@ function draw(t){
   DECO.rock.forEach(r=>{
     const q=cellToPx(r.x+.5,r.y+.5);
     if(q.x<-20||q.x>W+20||q.y<-20||q.y>H+20) return;
-    g.beginPath(); g.ellipse(q.x,q.y,r.r*s*1.25,r.r*s*.85,0,0,7);
-    g.fillStyle=r.k<.5?'#9aa6a8':'#7d8a8c'; g.fill();
-    g.strokeStyle=K.OUT; g.lineWidth=Math.max(1,OW*0.35); g.stroke();
-    g.beginPath(); g.ellipse(q.x-r.r*s*.3,q.y-r.r*s*.25,r.r*s*.45,r.r*s*.28,0,0,7);
-    g.fillStyle='rgba(255,255,255,.30)'; g.fill();
+    /* 取ってきた岩。**種類は素材から、大きさと向きはコードで散らす** */
+    const ri = A[ROCKS[(r.k*ROCKS.length)|0]];
+    if(ri){ const w=r.r*s*3.4, h=w*ri.height/ri.width;
+      g.save(); g.translate(q.x,q.y); g.rotate((r.k-.5)*1.2);
+      g.drawImage(ri,-w/2,-h/2,w,h); g.restore(); }
+    else { g.beginPath(); g.ellipse(q.x,q.y,r.r*s*1.25,r.r*s*.85,0,0,7);
+      g.fillStyle=r.k<.5?'#9aa6a8':'#7d8a8c'; g.fill(); }
   });
 
-  /* 木 */
+  /* 木 ── 素材は一枚。**大きさ・回転・色味はコードで散らす** */
   DECO.tree.forEach(tr=>{
     const q=cellToPx(tr.x,tr.y);
     if(q.x<-20||q.x>W+20||q.y<-20||q.y>H+20) return;
-    const R=tr.s*s*.62, sw=Math.sin(t*1.1+tr.ph)*R*.10;
-    g.beginPath(); g.ellipse(q.x,q.y+R*.85,R*.75,R*.28,0,0,7);
-    g.fillStyle='rgba(20,45,30,.22)'; g.fill();
-    g.beginPath(); g.moveTo(q.x-R*.13,q.y+R*.7); g.lineTo(q.x-R*.10+sw,q.y);
-    g.lineTo(q.x+R*.10+sw,q.y); g.lineTo(q.x+R*.13,q.y+R*.7); g.closePath();
-    g.fillStyle='#a8703c'; g.fill();
-    g.strokeStyle=K.OUT; g.lineWidth=Math.max(1,OW*0.3); g.stroke();
-    g.beginPath(); g.ellipse(q.x+sw,q.y-R*.30,R*.72,R*.66,0,0,7);
-    g.fillStyle='#4aa848'; g.fill();
-    g.strokeStyle=K.OUT; g.lineWidth=Math.max(1.2,OW*0.42); g.stroke();
-    g.beginPath(); g.ellipse(q.x+sw-R*.22,q.y-R*.48,R*.34,R*.26,0,0,7);
-    g.fillStyle='rgba(160,235,140,.55)'; g.fill();
+    const ti=A.tree; if(!ti) return;
+    const R=tr.s*s*1.55, h=R*ti.height/ti.width;
+    const sw=Math.sin(t*1.1+tr.ph)*R*.030;              /* 決まり8：ゆっくり揺れる */
+    g.beginPath(); g.ellipse(q.x,q.y+h*.34,R*.34,R*.12,0,0,7);
+    g.fillStyle='rgba(20,45,30,.22)'; g.fill();          /* 決まり6：足元の影 */
+    g.save(); g.translate(q.x+sw,q.y);
+    g.rotate((tr.ph/7-.5)*1.6);
+    g.filter='hue-rotate('+(((tr.ph*37)%22)-11).toFixed(0)+'deg) brightness('+(0.88+(tr.ph%1)*0.24).toFixed(2)+')';
+    g.drawImage(ti,-R/2,-h/2,R,h); g.filter='none'; g.restore();
   });
 
   /* 繋がっている海／いない海を、升からそのまま描く。
@@ -1219,11 +1269,14 @@ function draw(t){
           g.beginPath(); g.moveTo(L.ax,L.ay); g.lineTo(pos.x,pos.y);
           g.strokeStyle='rgba(255,255,255,.34)'; g.lineWidth=1.6; g.stroke(); }
         plate(pos.x,pos.y,L.c.name,sub);
+        goodsIcon(box.x+K.GOODS_PX*0.16, box.y+K.GOODS_PX*0.16, L.c.good.name, K.GOODS_PX);
         return;
       }
     }
     /* どこにも入らなかったときだけ、名前だけを小さく置く */
-    plate(L.x,L.y,L.c.name,null);
+    { const m=measure(L.c.name,null);
+      plate(L.x,L.y,L.c.name,null);
+      goodsIcon(L.x-m.w/2+K.GOODS_PX*0.16, L.y-m.h/2+K.GOODS_PX*0.16, L.c.good.name, K.GOODS_PX); }
   });
 
   /* 船は港に置く */
