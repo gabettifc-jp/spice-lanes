@@ -92,8 +92,15 @@ const K = {
 
   /* ── 読みやすさ（決定96） ── */
   LABEL_GAP: 3.2,              /* 名札を都市からどれだけ離すか（都市の大きさに対する割合） */
-  LABEL_TRY: 8,                /* 重なったとき、いくつ置き場所を試すか */
+  LABEL_TRY: 24,               /* 重なったとき、いくつ置き場所を試すか */
   LABEL_STEP: 26,              /* 置き場所をずらす幅（画面の点） */
+  LABEL_WIDE: 2.0,             /* 置き場所を左右にどれだけ広く探すか（札は横に長い） */
+  TREE_TINTS: 8,               /* 木の色味を何通り焼いておくか */
+  TREE_HUE: 11,                /* 色味の振れ幅（度） */
+  TREE_BRIGHT: 0.24,           /* 明るさの振れ幅 */
+  REPORT_ROWS: 6,              /* 収入の窓に、航路を何本まで並べるか */
+  REPORT_W: 780,               /* 収入の窓の幅（画面の点） */
+  CITY_KEEP: 2.3,              /* 都市のまわり、名札を置かせない広さ（都市の大きさに対する割合） */
   LANE_TAG_BG: 0.72,           /* 航路の数字の座の濃さ */
   SAIL_EASE: 1,                /* 1で船の出だしと終わりがゆっくりになる */
   FLASH_MS: 1600,              /* 剥がれたところを光らせる時間 */
@@ -239,6 +246,26 @@ const S={
   pops:[], jumps:[],       /* 手応え（決定91） */
 };
 
+/* **囲まれた黒は、埋める。**
+   がべ ──「周り全部探索しても真ん中が黒いまま」（2026-08-25）。
+   外の黒から辿り着けない黒は、**まわりが全部分かっている**ということなので、残す理由が無い。
+   埋めるときも確率 P に従うので、想定地形からはずれない（決定36） */
+function fillEnclosed(){
+  const seen=new Uint8Array(K.COLS*K.ROWS), q=[];
+  const push=(x,y)=>{ const i=pi(x,y); if(seen[i]||ST[i]) return; seen[i]=1; q.push(i); };
+  for(let x=0;x<K.COLS;x++){ push(x,0); push(x,K.ROWS-1); }
+  for(let y=0;y<K.ROWS;y++){ push(0,y); push(K.COLS-1,y); }
+  for(let h=0;h<q.length;h++){
+    const i=q[h], x=i%K.COLS, y=(i/K.COLS)|0;
+    if(x>0) push(x-1,y);
+    if(x<K.COLS-1) push(x+1,y);
+    if(y>0) push(x,y-1);
+    if(y<K.ROWS-1) push(x,y+1);
+  }
+  let n=0;
+  for(let i=0;i<ST.length;i++) if(!ST[i] && !seen[i]){ ST[i] = R()<P[i] ? 2 : 1; n++; }
+  return n;
+}
 function revealCircle(cx,cy,r,forceSea){
   for(let y=Math.max(0,cy-r|0);y<Math.min(K.ROWS,cy+r+1);y++)
   for(let x=Math.max(0,cx-r|0);x<Math.min(K.COLS,cx+r+1);x++){
@@ -503,6 +530,7 @@ function applyResult(res){
       }
     }
     c.shown=true; found.push(c); });
+  fillEnclosed();                    /* 囲まれた黒を埋めてから掃除する */
   tidy(); dirty=true; stVer++; recalcRoute();
   res.found=found; res.applied=true;
 }
@@ -556,21 +584,34 @@ function effMul(lane,good){
   let m=1;
   const grow=1+Math.min(K.GROW_CAP,lane.age*K.GROW_PER_TURN);   /* 育つ（決定73） */
   if(good.kind==='fat') m*=1+(good.n)*grow;
+  /* **「全部の航路に効く」品は、都市ひとつにつき一度だけ数える。**
+     航路ごとに数えていたので、同じ都市が三本に繋がっていると三回掛かっていた。
+     実測（2026-08-25）：航路 1本で ×1.80 → 8本で **×29.09**、総収入 426 → 23,729。
+     取り立ては 600／2,400 なので、**繋ぐだけで壊れる。**
+     「全部の航路 ＋15%」は、そう読むしかない。**育ちは cityGrow（その都市のいちばん長い航路）** */
+  const seen=new Set();
   S.lanes.forEach(l=>{ for(const c of [l.a,l.b]){
-    if(c.good.kind!=='other') continue;
-    const og=1+Math.min(K.GROW_CAP,l.age*K.GROW_PER_TURN);
+    if(c.good.kind!=='other' || seen.has(c)) continue;
+    seen.add(c);
+    const og=1+cityGrow(c);
     if(c.good.name==='龍涎香') m*=1+c.good.n*og;
     if(c.good.name==='岩塩' && good.kind==='fat') m*=1+c.good.n*og;
   }});
   return m;
 }
-function laneIncome(l){
+/* **式は一本のまま。**内訳を見せるために、途中の値も返す
+   （がべ：何がどう効いて、どう成長したのかとかわかるようにしないとね） */
+function laneBreak(l){
   const straight=Math.hypot(l.a.x-l.b.x,l.a.y-l.b.y);
   const dist=1+straight/K.DIST_HALF;
   const reg=K.REGION_MUL[regionGap(l.a.region,l.b.region)];
-  const one=(from,to)=> from.good.value*dist*reg*rareMul(to,from.good)*effMul(l,from.good);
-  return one(l.a,l.b)+one(l.b,l.a) - l.len*K.KEEP_COST;
+  const one=(from,to)=>{
+    const rare=rareMul(to,from.good), eff=effMul(l,from.good);
+    return {from,to,good:from.good,dist,reg,rare,eff, sum:from.good.value*dist*reg*rare*eff}; };
+  const ab=one(l.a,l.b), ba=one(l.b,l.a), keep=l.len*K.KEEP_COST;
+  return {ab,ba,keep, total:ab.sum+ba.sum-keep};
 }
+function laneIncome(l){ return laneBreak(l).total; }
 const totalIncome=()=>S.lanes.reduce((s,l)=>s+laneIncome(l),0);
 
 /* ══ 手応え（決定91） ══════════════════════════════════════
@@ -611,6 +652,7 @@ function centerOn(){}
 let sel=null;   /* 繋ぐときに選んだ一つ目 */
 const BTN=[];   /* 当たり判定 {x,y,w,h,fn} */
 const LABELS=[];/* 名札を後回しにして、重なりを見る */
+const TAGS=[];  /* 航路の数字の座。名札はここも避ける */
 
 function say(t){ S.msg=t; S.msgT=performance.now(); }
 
@@ -705,19 +747,30 @@ function reroll(){                            /* 決定61：走った分だけ�
 function nextTurn(){                          /* 決定60：次に進むと確定 */
   sfx('turn.end');
   const before=S.lanes.map(l=>[l.a,l.b]).flat().map(growStep);
-  if(S.lanes.length) money(Math.round(totalIncome()),'航路の収入');  /* 決定67：金が動くのはここ */
+  /* **控えを取ってから金を動かす。**動かしたあとでは、何がどう効いたかが読めない
+     （がべ：何がどう効いて、どう成長したのかとかわかるようにしないとね） */
+  const rep={turn:S.turn, rows:S.lanes.map(l=>({l, br:laneBreak(l), age:l.age})),
+             income:0, grew:[], quota:0, gold0:S.gold};
+  rep.income=Math.round(totalIncome());
+  if(S.lanes.length) money(rep.income,'航路の収入');  /* 決定67：金が動くのはここ */
   S.lanes.forEach(l=>l.age++);
   /* 段が上がった都市を跳ねさせる ── 育ちが目に見える（決定91） */
   { const after=S.lanes.map(l=>[l.a,l.b]).flat();
-    after.forEach((c,i)=>{ if(growStep(c)>before[i]){ jump(c); sfx('city.grew'); } }); }
+    after.forEach((c,i)=>{ if(growStep(c)>before[i]){ jump(c); sfx('city.grew');
+      if(!rep.grew.includes(c)) rep.grew.push(c); } }); }
   S.pins=[]; S.result=null; S.cuts=0; S.turn++; S.phase='plan';
   S.undo=null; recalcRoute();                                /* 決定60：次に進むと確定。もう戻せない */
   /* 決定39：取り立てはターンの頭、収入が入った直後 */
   if(S.quotaIx<K.QUOTAS.length && S.turn>K.QUOTA_TURNS[S.quotaIx]){
-    if(S.gold>=K.QUOTAS[S.quotaIx]){ money(-K.QUOTAS[S.quotaIx],'取り立て'); S.quotaIx++;
+    if(S.gold>=K.QUOTAS[S.quotaIx]){ rep.quota=K.QUOTAS[S.quotaIx];
+      money(-K.QUOTAS[S.quotaIx],'取り立て'); S.quotaIx++;
       if(S.quotaIx>=K.QUOTAS.length) S.phase='clear'; else say('取り立てを越えた'); }
     else S.phase='over';
   }
+  /* **金が動いたら、何がどう効いたかを出す。**終わりの画面のほうが強い */
+  rep.gold=S.gold;
+  S.report=(rep.rows.length||rep.quota) ? rep : null;
+  if(S.report && S.phase==='plan') S.phase='income';
 }
 function restart(){ location.reload(); }
 
@@ -927,7 +980,25 @@ const IMG = {"tree":"../sozai/riku/deco_tree_top.png","rock_a":"../sozai/riku/de
 const SFX_SRC = {"city.found":"../oto/city.found.ogg","city.grew":"../oto/city.grew.ogg","cut":"../oto/cut.ogg","explore.report":"../oto/explore.report.ogg","explore.start":"../oto/explore.start.ogg","money.tick":"../oto/money.tick.ogg","money.tick2":"../oto/money.tick2.ogg","route.linked":"../oto/route.linked.ogg","turn.end":"../oto/turn.end.ogg"};
 const A = {};                                   /* 読めた絵 */
 for (const k in IMG){ const im = new Image(); im.src = IMG[k];
-  im.onload = ()=>{ A[k] = im; dirty = true; }; }
+  im.onload = ()=>{ A[k] = im; if(k==='tree') bakeTrees(im); dirty = true; }; }
+
+/* **色味を変えた木を、はじめに何枚か焼いておく。**
+   g.filter は一回ごとに画面全体を作り直すので、515本に掛けると
+   **一枚 4,623ミリ秒**かかった（2026-08-25 実測）。焼いてしまえば只 */
+const TREES=[];
+function bakeTrees(im){
+  TREES.length=0;
+  for(let i=0;i<K.TREE_TINTS;i++){
+    const c=document.createElement('canvas');
+    c.width=im.width; c.height=im.height;
+    const x=c.getContext('2d');
+    const u=K.TREE_TINTS>1 ? i/(K.TREE_TINTS-1) : 0.5;
+    x.filter='hue-rotate('+((u-0.5)*2*K.TREE_HUE).toFixed(0)+'deg) brightness('
+            +(1-K.TREE_BRIGHT/2+u*K.TREE_BRIGHT).toFixed(2)+')';
+    x.drawImage(im,0,0);
+    TREES.push(c);
+  }
+}
 const ROCKS = ['rock_a','rock_b','rock_c','rock_d','pebble'];
 
 /* 特産品の絵。**名札の角に出す**（いままで文字だけだった） */
@@ -1011,7 +1082,7 @@ const NC=()=>document.createElement('canvas');
 const mapC=NC();          /* 地図を焼いておく一枚 */
 let dirtyMap=true;
 function draw(t){
-  BTN.length=0; LABELS.length=0;
+  BTN.length=0; LABELS.length=0; TAGS.length=0;
   fitView(); const s=VS;
   const dt=Math.max(0,Math.min(.1,t-(lastT||t))); lastT=t;
   /* 所持金は、いきなり変わらずに数えあがる（決定91） */
@@ -1083,15 +1154,15 @@ function draw(t){
   DECO.tree.forEach(tr=>{
     const q=cellToPx(tr.x,tr.y);
     if(q.x<-20||q.x>W+20||q.y<-20||q.y>H+20) return;
-    const ti=A.tree; if(!ti) return;
+    if(!TREES.length) return;
+    const ti=TREES[((tr.ph*37)|0)%TREES.length];        /* 焼いた色味から一枚選ぶ */
     const R=tr.s*s*1.55, h=R*ti.height/ti.width;
     const sw=Math.sin(t*1.1+tr.ph)*R*.030;              /* 決まり8：ゆっくり揺れる */
     g.beginPath(); g.ellipse(q.x,q.y+h*.34,R*.34,R*.12,0,0,7);
     g.fillStyle='rgba(20,45,30,.22)'; g.fill();          /* 決まり6：足元の影 */
     g.save(); g.translate(q.x+sw,q.y);
     g.rotate((tr.ph/7-.5)*1.6);
-    g.filter='hue-rotate('+(((tr.ph*37)%22)-11).toFixed(0)+'deg) brightness('+(0.88+(tr.ph%1)*0.24).toFixed(2)+')';
-    g.drawImage(ti,-R/2,-h/2,R,h); g.filter='none'; g.restore();
+    g.drawImage(ti,-R/2,-h/2,R,h); g.restore();
   });
 
   /* 繋がっている海／いない海を、升からそのまま描く。
@@ -1145,6 +1216,7 @@ function draw(t){
     g.fillStyle='rgba(14,20,32,'+K.LANE_TAG_BG+')'; g.fill();
     g.strokeStyle=K.OUT; g.lineWidth=1.4; g.stroke();
     g.fillStyle='#ffe9a8'; g.fillText(tag, q.x, q.y-9);
+    TAGS.push({x:q.x-tw/2, y:q.y-17, w:tw, h:17});   /* 名札に避けさせる */
   });
 
   /* 走っている船の航跡（演出） */
@@ -1235,7 +1307,7 @@ function draw(t){
       g.strokeStyle='#ff8f8f'; g.lineWidth=2.6; g.stroke();
     }
     g.restore();
-    LABELS.push({x:q.x, y:q.y+r*K.LABEL_GAP, ax:q.x, ay:q.y, c});
+    LABELS.push({x:q.x, y:q.y+r*K.LABEL_GAP, ax:q.x, ay:q.y, r, c});
   });
 
   /* 名札：重なったら消さずに、置き場所をずらす（決定96）
@@ -1247,33 +1319,54 @@ function draw(t){
     let tw=g.measureText(name).width;
     if(sub){ g.font='11px system-ui,sans-serif'; tw=Math.max(tw,g.measureText(sub).width); }
     return {w:tw+22, h:sub?38:26}; };
+  /* **都市そのものを、先に埋めておく。**
+     がべ ──「都市が見えなくなることはよくない」「ペトラまったく見えてない」。
+     置き場所を探す処理が都市の居場所を知らなかったので、自分の名札で自分を隠していた */
+  LABELS.forEach(L=>{
+    const k=L.r*K.CITY_KEEP;
+    placed.push({x:L.ax-k, y:L.ay-k*1.15, w:k*2, h:k*2.1});
+  });
+  TAGS.forEach(t=>placed.push(t));           /* 航路の数字の座も避ける */
+
+  /* はみ出した分の面積。**どこにも入らなかったとき、いちばんマシな所を選ぶため** */
+  const over=(b)=>placed.reduce((s,o)=>{
+    const w=Math.min(b.x+b.w,o.x+o.w)-Math.max(b.x,o.x);
+    const h=Math.min(b.y+b.h,o.y+o.h)-Math.max(b.y,o.y);
+    return s + (w>0&&h>0 ? w*h : 0); },0);
+
   LABELS.forEach(L=>{
     const gr=cityGrow(L.c);
     const full=L.c.good.name+'・'+L.c.good.eff+(gr>0? ' ▲'+Math.round(gr*100)+'%':'');
-    /* 置き場所を、都市のまわりに順に試す。下 → 上 → 右 → 左 → さらに外へ */
-    const around=[];
+    /* 置き場所を、都市のまわりに一周ぶん試す。下から時計回りに、外へ広がる。
+       **札は横に長いので、左右を広く探す**（K.LABEL_WIDE） */
+    const around=[], gap=L.y-L.ay;
     for(let k=0;k<K.LABEL_TRY;k++){
-      const ring=1+Math.floor(k/4), d=K.LABEL_STEP*ring;
-      const dir=k%4;
-      around.push({x:L.ax+(dir===2?d*2.2:dir===3?-d*2.2:0),
-                   y:L.ay+(dir===0?d+(L.y-L.ay):dir===1?-(d+(L.y-L.ay)):(L.y-L.ay))});
+      const ring=1+Math.floor(k/8), a=(k%8)/8*Math.PI*2+Math.PI/2;
+      const d=gap+K.LABEL_STEP*(ring-1);
+      around.push({x:L.ax+Math.cos(a)*d*K.LABEL_WIDE, y:L.ay+Math.sin(a)*d});
     }
+    const draw=(pos,m,sub)=>{
+      const box={x:pos.x-m.w/2, y:pos.y-m.h/2, w:m.w, h:m.h};
+      placed.push(box);
+      /* 都市から離れたときは、どの都市の札か分かるように引き出し線を引く */
+      if(Math.hypot(pos.x-L.ax,pos.y-L.ay)>K.LABEL_STEP*1.6){
+        g.beginPath(); g.moveTo(L.ax,L.ay); g.lineTo(pos.x,pos.y);
+        g.strokeStyle='rgba(255,255,255,.34)'; g.lineWidth=1.6; g.stroke(); }
+      plate(pos.x,pos.y,L.c.name,sub);
+      goodsIcon(box.x+K.GOODS_PX*0.16, box.y+K.GOODS_PX*0.16, L.c.good.name, K.GOODS_PX);
+    };
+    let best=null;
     for(const sub of [full, null]){          /* 入らなければ、名前だけの小さい札にする */
       const m=measure(L.c.name,sub);
       for(const pos of around){
         const box={x:pos.x-m.w/2, y:pos.y-m.h/2, w:m.w, h:m.h};
-        if(overlap(box)) continue;
-        placed.push(box);
-        /* 都市から離れたときは、どの都市の札か分かるように引き出し線を引く */
-        if(Math.hypot(pos.x-L.ax,pos.y-L.ay)>K.LABEL_STEP*1.6){
-          g.beginPath(); g.moveTo(L.ax,L.ay); g.lineTo(pos.x,pos.y);
-          g.strokeStyle='rgba(255,255,255,.34)'; g.lineWidth=1.6; g.stroke(); }
-        plate(pos.x,pos.y,L.c.name,sub);
-        goodsIcon(box.x+K.GOODS_PX*0.16, box.y+K.GOODS_PX*0.16, L.c.good.name, K.GOODS_PX);
-        return;
+        const o=over(box);
+        if(o===0){ draw(pos,m,sub); return; }
+        if(sub===null && (!best || o<best.o)) best={o, pos, m};
       }
     }
-    /* どこにも入らなかったときだけ、名前だけを小さく置く */
+    /* どこにも入らなかったら、**いちばん隠さない所**に名前だけ置く（真上ではなく） */
+    if(best){ draw(best.pos, best.m, null); return; }
     { const m=measure(L.c.name,null);
       plate(L.x,L.y,L.c.name,null);
       goodsIcon(L.x-m.w/2+K.GOODS_PX*0.16, L.y-m.h/2+K.GOODS_PX*0.16, L.c.good.name, K.GOODS_PX); }
@@ -1403,6 +1496,85 @@ function draw(t){
     button(bx+bw-186, byy+bh-58, 160, 42, '進む', '#4fb8e8', ()=>{ S.phase='plan'; nextTurn(); }, true);
     g.textAlign='center'; g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub;
     g.fillText('進むと確定する', bx+bw/2, byy+bh-14);
+  }
+
+  /* ══ 収入の窓（決定67：金が動くのはここ） ══════════════
+     がべ ──「お金が入るタイミングは何か特別なウィンドウ出して、
+     何がどう効いて、どう成長したのかとかわかるようにしないとね」
+     **値は laneBreak() から取る。式を二重に書かない** */
+  if(S.phase==='income' && S.report){
+    const r=S.report;
+    const rows=r.rows.slice().sort((a,b)=>b.br.total-a.br.total);
+    const shown=rows.slice(0,K.REPORT_ROWS), rest=rows.length-shown.length;
+    const bw=K.REPORT_W, bh=118+shown.length*52+(rest>0?20:0)+(r.quota?26:0);
+    const bx=W/2-bw/2, byy=Math.max(64,(H-bh)/2-20);
+    g.fillStyle='rgba(9,16,28,.62)'; g.fillRect(0,52,W,H-52);
+    g.beginPath(); g.roundRect(bx,byy,bw,bh,18); g.fillStyle='#182236'; g.fill();
+    g.strokeStyle=K.OUT; g.lineWidth=3; g.stroke();
+
+    g.textAlign='left'; g.textBaseline='middle';
+    g.font='700 17px system-ui,"Hiragino Kaku Gothic ProN",sans-serif'; g.fillStyle='#eef1f5';
+    g.fillText(r.turn+' ターン目の実り', bx+26, byy+32);
+    g.textAlign='right';
+    g.font='700 26px system-ui,sans-serif'; g.fillStyle='#8ce6a0';
+    g.fillText('+'+r.income, bx+bw-26, byy+32);
+    g.textAlign='left';
+    g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub;
+    g.fillText('品の値 × 遠さ × 地域 × 希少 × 効果 ── 二つの都市が互いに送り合う（決定32）',
+               bx+26, byy+58);
+
+    let ly=byy+92;
+    const num=(v)=>'×'+v.toFixed(2);
+    shown.forEach(row=>{
+      const {l,br,age}=row;
+      /* 一行目：どの航路か */
+      g.font='700 14px system-ui,"Hiragino Kaku Gothic ProN",sans-serif'; g.fillStyle='#ffe9a8';
+      g.fillText(l.a.name+' ⇄ '+l.b.name, bx+26, ly);
+      g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub;
+      g.fillText(age+'年', bx+26+g.measureText(l.a.name+' ⇄ '+l.b.name).width+70, ly);
+      g.textAlign='right';
+      g.font='700 15px system-ui,sans-serif';
+      g.fillStyle=br.total>=0?'#8ce6a0':'#ff9a9a';
+      g.fillText((br.total>=0?'+':'')+Math.round(br.total), bx+bw-26, ly);
+      g.textAlign='left';
+      /* 二・三行目：向きごとの内訳。**希少が効いているところだけ色を変える** */
+      /* **列の位置は決め打ちにする。**幅を足していくと、桁が伸びたとき隣に重なる */
+      const COL={品:bx+56, 値:bx+156, 遠:bx+178, 地域:bx+258, 希少:bx+338, 効果:bx+418,
+                 維持:bx+bw-118, 計:bx+bw-26};
+      [br.ab, br.ba].forEach((d,i)=>{
+        const y=ly+18+i*15;
+        goodsIcon(bx+42, y, d.good.name, 15);
+        g.font='11px system-ui,"Hiragino Kaku Gothic ProN",sans-serif';
+        g.fillStyle='#cfe6ff'; g.fillText(d.good.name, COL.品, y);
+        g.textAlign='right'; g.fillStyle=C.sub;
+        g.fillText(String(d.good.value), COL.値, y); g.textAlign='left';
+        g.fillText(num(d.dist)+' 遠', COL.遠, y);
+        g.fillStyle=d.reg>1.001?'#8fd3ff':C.sub;
+        g.fillText(num(d.reg)+' 地域', COL.地域, y);
+        g.fillStyle=d.rare>1.001?'#ffd36e':C.sub;         /* 希少が効いていれば目立つ */
+        g.fillText(num(d.rare)+' 希少', COL.希少, y);
+        g.fillStyle=d.eff>1.001?'#a9e88c':C.sub;
+        g.fillText(num(d.eff)+' 効果', COL.効果, y);
+        g.fillStyle='#9aa4b2'; g.textAlign='right';
+        g.fillText('= '+Math.round(d.sum), COL.計, y); g.textAlign='left';
+      });
+      g.font='11px system-ui,sans-serif'; g.fillStyle='#ff9a9a'; g.textAlign='right';
+      g.fillText('維持 −'+Math.round(br.keep), bx+bw-118, ly+25.5); g.textAlign='left';
+      ly+=52;
+    });
+    if(rest>0){ g.font='11px system-ui,sans-serif'; g.fillStyle=C.sub;
+      g.fillText('ほか '+rest+' 本（実りの小さい順に隠してある）', bx+26, ly); ly+=20; }
+
+    if(r.grew.length){ g.font='12px system-ui,"Hiragino Kaku Gothic ProN",sans-serif';
+      g.fillStyle='#a9e88c';
+      g.fillText('育った　'+r.grew.map(c=>c.name).join('・')+'　── 繋いだままだと、実りが増える（決定73）',
+                 bx+26, ly); }
+    if(r.quota){ g.font='700 13px system-ui,"Hiragino Kaku Gothic ProN",sans-serif';
+      g.fillStyle='#ff9a9a';
+      g.fillText('取り立て −'+r.quota+'　→　所持 '+r.gold, bx+26, ly+(r.grew.length?20:0)); }
+
+    button(bx+bw-186, byy+bh-24, 160, 42, '進む', '#4fb8e8',
+           ()=>{ S.phase='plan'; S.report=null; }, true);
   }
   if(S.phase==='over'||S.phase==='clear'){
     g.fillStyle='rgba(9,16,28,.88)'; g.fillRect(0,0,W,H);
