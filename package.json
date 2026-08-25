@@ -4,5 +4,8 @@
     "phaser": "^4.2.1",
     "pixi-filters": "^6.1.5",
     "pixi.js": "^8.20.0"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.1"
   }
 }
